@@ -1,0 +1,228 @@
+# yaml-language-server: $schema=https://dv-flow.github.io/flow.dv.schema.json
+#****************************************************************************
+#* project.dv.uvm.utils
+#*
+#* Copyright 2023-2025 Matthew Ballance and Contributors
+#*
+#* Licensed under the Apache License, Version 2.0 (the "License"); you may
+#* not use this file except in compliance with the License.
+#* You may obtain a copy of the License at:
+#*
+#*   http://www.apache.org/licenses/LICENSE-2.0
+#*
+#* Unless required by applicable law or agreed to in writing, software
+#* distributed under the License is distributed on an "AS IS" BASIS,
+#* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#* See the License for the specific language governing permissions and
+#* limitations under the License.
+#*
+#****************************************************************************
+package:
+  name: project.dv.uvm.utils
+  desc: Reusable UVM building blocks -- env library, testbench image, and test-run compounds
+
+  doc: |-
+    A methodology CAPABILITY package, not a project archetype: nothing here is
+    inherited with `uses:`. A project instantiates these compounds by name --
+    they are in scope for anything that inherits `project.dv.uvm`:
+
+        - name: uvm-env
+          uses: project.dv.uvm.utils.env-base
+          needs: [rtl, "flags-comp-${{ build }}"]
+
+    Long names are the cost of an unambiguous one. Alias the package if they
+    grate:
+
+        imports:
+        - {name: project.dv.uvm.utils, as: uvm}
+
+        # ... then `uses: uvm.env-base`
+
+    FLAG-AGNOSTIC BY CONSTRUCTION. No task here names a flag holder. Each
+    compound has an injection slot -- a passthrough subtask that forwards
+    whatever the instantiation's `needs:` feeds it -- so compile, elaborate and
+    run flags arrive through the compound boundary from the project that owns
+    the opt-vs-debug choice. That is what keeps these blocks reusable across
+    projects whose build variants differ.
+
+    Requires UVM_HOME=$IVPM_PACKAGES/uvm -- hdlsim.SimLibUVM locates UVM
+    through it.
+
+  with:
+    # Simulator backend. Left as an independent variable rather than read from
+    # `project.dv` because this package is not in that inheritance chain -- it
+    # is instantiated, not inherited. A project-wide `--sim`/`-D sim=<name>`
+    # reaches it all the same, since an unqualified package-variable override
+    # applies to every package declaring that name.
+    sim:
+      type: str
+      value: "vlt"
+      desc: Simulator backend for the images and runs these compounds build
+
+  tasks:
+  # UVM library provider (SimLibUVM) -- the one dependency this package owns.
+  # env-base pulls it in as an upstream compile input.
+  - export: lib
+    uses: hdlsim.SimLibUVM
+    desc: The compiled UVM base library
+    with:
+      sim: "${{ sim }}"
+
+  # ---- Reusable building blocks ----------------------------------------------
+  # env-base : compiles the shared env + tests sources into a UVM SimLib.
+  # tb-img   : PRIMARY tb-image compound -- takes a genuine list-typed `top`
+  #   (threaded whole-value into the nested SimImage) plus `tb_include` tb
+  #   sources, building the image on an env library injected through the
+  #   compound boundary.
+  # tb-base  : combines env + tb for the simple, self-contained case.
+  # run      : runs one UVM test on an injected image.
+  #
+  # All take a `basedir` param (root of the UVM tree holding env/ tests/ tb/),
+  # defaulting to the instantiation's srcdir; override to retarget the tree.
+
+  - export: env-base
+    desc: Compile a project's shared UVM env and tests packages into a simulation library
+    with:
+      # Root of the UVM directory tree (holds env/ tests/ tb/). Defaults to the
+      # instantiation's own srcdir; override to point the shared env/tb tasks
+      # at a different UVM tree. 'basedir' is threaded into both the FileSet
+      # base and its incdirs (incdirs resolve against srcdir, not base).
+      basedir:
+        type: str
+        value: "${{ srcdir }}"
+      # Package files to compile from env/, in dependency order. Defaults to a
+      # glob (alphabetical); override with an explicit ordered list when the
+      # packages form a stack alphabetical order would mis-sequence.
+      env_include:
+        type: list
+        value: ["*_pkg.sv"]
+    tasks:
+    # Injection slot: forwards whatever the instantiation feeds -- the design
+    # package deps AND the project's compile-flag DataItem -- down to env-src ->
+    # ... -> env-lib. `lib` is the only STATIC need (same package). Flags are
+    # NOT named here.
+    - name: pre-deps
+      consumes: none
+      needs: [lib]
+
+    - name: env-src
+      needs: [pre-deps]
+      uses: std.FileSet
+      with:
+        base: "${{ basedir }}/env"
+        type: systemVerilogSource
+        include: "${{ env_include }}"
+        incdirs: [ "${{ basedir }}", "${{ basedir }}/env" ]
+
+    - name: env
+      needs: [env-src]
+      consumes: none
+
+    - name: tests-src
+      needs: [env]
+      uses: std.FileSet
+      with:
+        base: "${{ basedir }}/tests"
+        type: systemVerilogSource
+        include: ["*_pkg.sv"]
+        incdirs: [ "${{ basedir }}", "${{ basedir }}/tests" ]
+
+    - name: tests
+      needs: [tests-src]
+      consumes: none
+
+    - name: env-lib
+      needs: [ tests ]
+      uses: hdlsim.SimLib
+      with:
+        sim: "${{ sim }}"
+
+  # Build a UVM simulation image for one DUT-view variant. `top` is a genuine
+  # list-typed compound param: overridden per-instance with a list
+  # (`top: [hvl_top_spl]`) and threaded whole-value into the nested SimImage's
+  # list-typed `top`. The shared env-lib AND the project's compile/elab flag
+  # DataItems are injected through the compound boundary via the
+  # instantiation's `needs:`; they flow in through tb-src (a passthrough
+  # FileSet that also compiles the tb tops named by `tb_include`).
+  - export: tb-img
+    desc: Build a UVM simulation image from tb top sources and an injected env library
+    with:
+      basedir: { type: str, value: "${{ srcdir }}" }
+      # tb top sources to compile (from ${basedir}/tb), e.g. [hdl_top.sv, hvl_top.sv]
+      tb_include: { type: list, value: [] }
+      # Simulation top module(s) -- a genuine list threaded into SimImage.top.
+      top: { type: list }
+      # Extra simulator/compile args for the image (e.g. Verilog-2001 ext map).
+      sim_args: { type: list, value: [] }
+    tasks:
+    # Injection slot + tb top sources: receives the compound input (env-lib AND
+    # the project's flag DataItems fed via the instantiation's needs), passes it
+    # through, and adds the tb tops.
+    - name: tb-src
+      uses: std.FileSet
+      with:
+        base: "${{ basedir }}/tb"
+        type: systemVerilogSource
+        include: "${{ tb_include }}"
+        incdirs: [ "${{ basedir }}/tb" ]
+
+    - { name: tb, needs: [tb-src], consumes: none }
+
+    - name: sim-img
+      needs: [tb]
+      uses: hdlsim.SimImage
+      with:
+        sim: "${{ sim }}"
+        top: "${{ top }}"
+        args: "${{ sim_args }}"
+
+  # Combined, self-contained testbench: env-lib (inherited from env-base) + tb
+  # top + image. The tb subtasks are inlined as DIRECT children (rather than
+  # instancing tb-img) because `${{ this.* }}` params cannot be threaded into a
+  # nested compound's `with:` -- only direct subtasks can read `this`. This
+  # keeps tb-base fully configurable (basedir / hvl_top / hdl_top).
+  - export: tb-base
+    uses: env-base
+    desc: Self-contained UVM testbench -- env library, tb tops and image in one compound
+    with:
+      hvl_top:
+        type: str
+        value: "hvl_top"
+      hdl_top:
+        type: str
+        value: "hdl_top"
+    tasks:
+    - name: tb-src
+      needs: [env-lib]
+      uses: std.FileSet
+      with:
+        base: "${{ basedir }}/tb"
+        type: systemVerilogSource
+        include: ["${{ hdl_top }}.sv", "${{ hvl_top }}.sv"]
+        incdirs: [ "${{ basedir }}/tb" ]
+    - name: tb
+      needs: [tb-src]
+      consumes: none
+    - name: sim-img
+      needs: [tb]
+      uses: hdlsim.SimImage
+      with:
+        sim: "${{ sim }}"
+        top: [ "${{ hvl_top }}" ]
+
+  # Run one UVM test. The sim IMAGE (and the project's run-flag DataItem) are
+  # injected through the compound boundary via the instantiation's `needs:` --
+  # so sim-run names no specific image and no flags. Its only content is the
+  # UVM_TESTNAME plusarg.
+  - export: run
+    desc: Run one UVM test on an injected simulation image
+    with:
+      UVM_TESTNAME:
+        type: str
+    tasks:
+    - name: sim-run
+      uses: hdlsim.SimRun
+      with:
+        sim: "${{ sim }}"
+        plusargs:
+        - "UVM_TESTNAME=${{ UVM_TESTNAME }}"

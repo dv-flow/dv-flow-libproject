@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dv-flow-libproject"
+version = "0.0.1"
+dependencies = [
+    # Needs `uses:` inheritance of package VARIABLES: without it a project
+    # inheriting project.dv gets the --sim/--build flags but not the variables
+    # they set. Deliberately unpinned -- consumers track dv-flow-mgr tip.
+    "dv-flow-mgr",
+    # project.dv's flag holders and test entrypoints, and every compound in
+    # project.dv.uvm.utils, are hdlsim tasks.
+    "dv-flow-libhdlsim",
+]
+authors = [
+    {name = "Matthew Ballance", email = "matt.ballance@gmail.com"},
+]
+description = "Provides dv-flow project archetypes and methodology-specific template tasks"
+license = {file = "LICENSE"}
+
+[project.entry-points."dv_flow.mgr"]
+libproject = "dv_flow.libproject.__ext__"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"dv_flow.libproject" = ["**/flow.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]

@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://dv-flow.github.io/flow.dv.schema.json
+#****************************************************************************
+#* project.dv.uvm
+#*
+#* Copyright 2023-2025 Matthew Ballance and Contributors
+#*
+#* Licensed under the Apache License, Version 2.0 (the "License"); you may
+#* not use this file except in compliance with the License.
+#* You may obtain a copy of the License at:
+#*
+#*   http://www.apache.org/licenses/LICENSE-2.0
+#*
+#* Unless required by applicable law or agreed to in writing, software
+#* distributed under the License is distributed on an "AS IS" BASIS,
+#* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#* See the License for the specific language governing permissions and
+#* limitations under the License.
+#*
+#****************************************************************************
+package:
+  name: project.dv.uvm
+  desc: UVM project archetype -- the project.dv interface plus the UVM building blocks
+
+  doc: |-
+    The base a UVM verification project inherits from:
+
+        package:
+          name: my-project
+          uses: project.dv.uvm
+          imports:
+          - project.dv.uvm
+
+          tasks:
+          - override: src-rtl
+            needs: [rtl]
+          - override: tests
+            needs: [uvm.uvm-tests]
+
+    Two things come with it. From `project.dv`, inherited: the project
+    interface (`src-rtl`, `src-spl`, `lint-rtl`), the `tests`/`tests-info`
+    entrypoints, the `--sim`/`--build` knobs and the `flags-<stage>-<variant>`
+    holders those knobs select, and the `sv-module`/`sv-package` FileSet
+    conveniences. From `project.dv.uvm.utils`, imported and so in scope: the
+    UVM compounds (`env-base`, `tb-img`, `tb-base`, `run`).
+
+    THIS package adds no tasks of its own, and that is the intended shape
+    rather than an unfinished one. `project.dv` is methodology-neutral so a
+    cocotb or formal archetype can sit beside this one on the same interface;
+    the UVM specifics are compounds a project instantiates, not tasks it
+    inherits. What this package contributes is the pairing -- inherit one name
+    and the UVM blocks are in scope wired to the same knobs.
+
+  imports:
+  # `uses:` names the base; the import is what puts it in scope to be found.
+  # Both are required.
+  - project.dv
+  # Not inherited -- imported so a project that inherits this one can
+  # instantiate the UVM compounds by name without importing them itself.
+  - project.dv.uvm.utils
+
+  uses: project.dv

@@ -1,0 +1,225 @@
+# yaml-language-server: $schema=https://dv-flow.github.io/flow.dv.schema.json
+#****************************************************************************
+#* project.dv
+#*
+#* Copyright 2023-2025 Matthew Ballance and Contributors
+#*
+#* Licensed under the Apache License, Version 2.0 (the "License"); you may
+#* not use this file except in compliance with the License.
+#* You may obtain a copy of the License at:
+#*
+#*   http://www.apache.org/licenses/LICENSE-2.0
+#*
+#* Unless required by applicable law or agreed to in writing, software
+#* distributed under the License is distributed on an "AS IS" BASIS,
+#* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#* See the License for the specific language governing permissions and
+#* limitations under the License.
+#*
+#****************************************************************************
+package:
+  name: project.dv
+  desc: Methodology-neutral DV project archetype -- the src-*/lint-* interface, the project-wide sim/build knobs, and the flag holders they drive
+
+  doc: |-
+    The base a design-verification project inherits from:
+
+        package:
+          name: my-project
+          uses: project.dv
+          imports:
+          - project.dv
+
+    What that buys is a COMMAND-LINE INTERFACE that is the same in every
+    project built this way -- `dfm run tests`, `dfm run tests-info`,
+    `--sim`, `--build` -- and a set of named slots (`src-rtl`, `src-spl`,
+    `lint-rtl`) a project fills in with `override:`.
+
+    Methodology-specific building blocks do not live here. A UVM project
+    inherits `project.dv.uvm`, which `uses:` this package and brings the UVM
+    compounds (`project.dv.uvm.utils.*`) into scope.
+
+    Note the `imports:` line above alongside `uses:`. A base package has to be
+    BOTH named by `uses:` and imported: `uses:` says which package to inherit
+    from, the import is what puts it in scope to be found.
+
+  # ---- Project-wide knobs ----------------------------------------------------
+  # Declared here rather than in each leaf so that the two questions every DV
+  # project has to answer -- which simulator, which build variant -- are asked
+  # the same way everywhere, and so `dfm run` documents them without the leaf
+  # restating the value set and its per-value help.
+  #
+  # A leaf reads them by plain name (`${{ sim }}`, `${{ build }}`), overrides a
+  # DEFAULT value-only (`with: {build: dbg}`), and can restate the whole
+  # declaration to change the accepted set. Inheriting a package variable
+  # requires dv-flow-mgr >= 1.19.
+  with:
+    sim:
+      type: str
+      value: vlt
+      cli: true
+      desc: Simulator backend for every image and run in this project
+      values:
+      - {value: vlt, desc: "Verilator -- the default"}
+      - {value: mti, desc: "Siemens Questa/ModelSim"}
+      - {value: vcs, desc: "Synopsys VCS"}
+      - {value: xcm, desc: "Cadence Xcelium"}
+      - {value: xsm, desc: "AMD/Xilinx XSim"}
+      - {value: ivl, desc: "Icarus Verilog"}
+
+    build:
+      type: str
+      value: opt
+      cli: true
+      desc: Build variant for every image and run in this project
+      doc: |-
+        One knob moves the compiled library, the simulation image and the run
+        flags together, because each consumer names its flag holder by the
+        variable rather than by a literal:
+
+            needs: [ "flags-comp-${{ build }}" ]
+
+        A package CONFIG would express the same choice, but a config is global
+        and all-or-nothing. The moment a project grows a second DUT view or a
+        second image, "the RTL image in debug, everything else optimized" is
+        not expressible as a config and is two cells of an axis -- so this is a
+        variable, and stays one.
+      values:
+      - {value: opt, desc: "optimized -- the regression default"}
+      - {value: dbg, desc: "-O0, waveform tracing"}
+
+  tasks:
+  # ---- The project interface -------------------------------------------------
+  # The archetype states its contract once and every leaf is held to it. A slot
+  # declared here and never filled otherwise RUNS AND REPORTS SUCCESS -- the
+  # worst outcome for a shared interface, because it makes `dfm run <verb>`
+  # mean something in one project and nothing in the next. Hence the
+  # `std.check.Implemented` requirement on the slots that have no useful empty
+  # meaning.
+  - export: src-rtl
+    desc: |
+      Provides synthesizable Verilog RTL sources
+    # `src-rtl` IS the aggregated RTL source for the package, not a marker
+    # pointing at it. A consumer wired the way `lint-rtl` below is
+    # (`needs: [src-rtl]`) must receive the filesets, so the slot has to
+    # forward them: an `export:` task with no implementation passes through
+    # nothing by default, and the slot would deliver an empty input set to
+    # every consumer while still reporting success.
+    passthrough: all
+    requires:
+    # Implemented, not `Needs: {produces: std.FileSet}`. `produces:` matches
+    # what a task DECLARES, and `std.FileSet` tasks emit filesets at runtime
+    # without declaring anything -- so a produces-check here would fail a
+    # correctly wired project. Keyed checks suit a marker type a producer
+    # declares deliberately, not a ubiquitous type nobody annotates.
+    - std.check.Implemented:
+        hint: |
+          `src-rtl` must be wired to the task(s) providing this project's
+          synthesizable RTL. Typically:
+
+              - override: src-rtl
+                needs: [rtl]
+
+  - export: src-spl
+    desc: |
+      Provides sequential process level (SPL) SystemVerilog sources
+    # Same contract as `src-rtl`: the slot carries the sources.
+    passthrough: all
+
+  - root: lint-rtl
+    desc: |-
+      Entrypoint for running lint on RTL sources
+    needs: [src-rtl]
+    requires:
+    - std.check.Implemented:
+        hint: |
+          This project declares `lint-rtl` (inherited from project.dv) but
+          never implements it. Either wire it up:
+
+              - override: lint-rtl
+                needs: [ <a lint task> ]
+
+          or, if this project has no lint flow, say so explicitly:
+
+              - override: lint-rtl
+                uses: std.NotProvided
+
+          Declaring it not-provided takes `lint-rtl` out of `dfm run` -- the
+          project does not offer that verb -- while `dfm show task lint-rtl`
+          still reports that the slot exists and was declined on purpose.
+
+  - root: tests
+    uses: hdlsim.SimSuiteReport
+    desc: |-
+      Entrypoint for running tests defined by the project
+    doc: |-
+      The project's test-execution command. A leaf wires the available cases
+      and suites into it with `needs:`; everything else comes from
+      hdlsim.SimSuiteReport -> std.TestRunner:
+
+        dfm run tests                        # everything
+        dfm run tests --tests arb,err        # just those cases
+        dfm run tests --views rtl            # just that DUT view
+        dfm run tests --detail full          # every case in the report
+
+      Selection prunes the graph at build time, so a deselected case -- and any
+      simulation image only it needed -- is never built. The task status is the
+      CI gate: nonzero iff a case failed, errored, or nothing was selected.
+
+  - root: tests-info
+    uses: hdlsim.SimSuiteInfo
+    desc: |-
+      Show the tests and DUT views this project offers
+    doc: |-
+      Introspection companion to `tests`: it reports the inventory `tests`
+      selects over -- the case names `--tests` accepts and the view names
+      `--views` accepts -- and BUILDS NOTHING.
+
+        dfm run tests-info
+
+      The inventory is read off the `tests` root's own `needs:` at graph build,
+      so it cannot drift from what `tests` would run. A project that adds a
+      suite gets it here for free -- there is nothing to keep in sync.
+      `tests-info.json` lands in the rundir for scripted use.
+    with:
+      target: tests
+
+  # ---- Flag holders ----------------------------------------------------------
+  # ONE HOLDER PER (stage, variant), so a consumer picks its own by name --
+  # `needs: ["flags-comp-${{ build }}"]` -- and nothing downstream mentions
+  # `opt` or `dbg`. They live here, with the `build` variable that selects
+  # them, because a holder set that does not cover the declared value set is a
+  # broken project rather than a style choice.
+  #
+  # A project that ADDS a build variant declares the matching three holders in
+  # its own flow file alongside the restated `build` declaration; the names are
+  # the only contract.
+  - { name: flags-comp-opt, uses: hdlsim.SimCompArgsOpt, with: { sim: "${{ sim }}" } }
+  - { name: flags-comp-dbg, uses: hdlsim.SimCompArgsDbg, with: { sim: "${{ sim }}" } }
+  - { name: flags-elab-opt, uses: hdlsim.SimElabArgsOpt, with: { sim: "${{ sim }}" } }
+  - { name: flags-elab-dbg, uses: hdlsim.SimElabArgsDbg, with: { sim: "${{ sim }}" } }
+  - { name: flags-run-opt,  uses: hdlsim.SimRunArgsOpt,  with: { sim: "${{ sim }}" } }
+  - { name: flags-run-dbg,  uses: hdlsim.SimRunArgsDbg,  with: { sim: "${{ sim }}" } }
+
+  # ---- FileSet conveniences --------------------------------------------------
+  # `type: systemVerilogSource`, glob the directory. Callers supply `include`
+  # only when the glob does not match -- multiple packages in one directory, or
+  # a required compile order alphabetical would invert; where a directory maps
+  # 1:1 to a package or module, omit it.
+  #
+  # sv-module carries NO incdir: add `incdirs: [.]` case by case when a file
+  # `include`s a local .svh. sv-package keeps the self-incdir, since a package
+  # typically includes its own component .svh files.
+  - name: sv-module
+    uses: std.FileSet
+    desc: SystemVerilog module sources from a directory
+    with:
+      type: systemVerilogSource
+      include: [ "*.sv" ]
+
+  - name: sv-package
+    uses: sv-module
+    desc: SystemVerilog package sources from a directory, with the directory on the include path
+    with:
+      include: [ "*_pkg.sv" ]
+      incdirs: [ . ]

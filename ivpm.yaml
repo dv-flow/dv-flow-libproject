@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://fvutils.github.io/ivpm/ivpm.schema.json
+package:
+  name: dv-flow-libproject
+
+  dep-sets:
+  - name: default-dev
+    deps:
+    - name: pytest
+      src: pypi
+    - name: dv-flow-mgr
+      url: https://github.com/dv-flow/dv-flow-mgr.git
+    - name: dv-flow-libhdlsim
+      url: https://github.com/dv-flow/dv-flow-libhdlsim.git
