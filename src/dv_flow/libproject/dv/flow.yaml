@@ -31,8 +31,8 @@ package:
           - project.dv
 
     What that buys is a COMMAND-LINE INTERFACE that is the same in every
-    project built this way -- `dfm run tests`, `dfm run tests-info`,
-    `--sim`, `--build` -- and a set of named slots (`src-rtl`, `src-spl`,
+    project built this way -- `dfm run tests`, `dfm run smoke`,
+    `dfm run tests-info`, `--sim`, `--build` -- and a set of named slots (`src-rtl`, `src-spl`,
     `lint-rtl`) a project fills in with `override:`.
 
     Methodology-specific building blocks do not live here. A UVM project
@@ -167,6 +167,33 @@ package:
       Selection prunes the graph at build time, so a deselected case -- and any
       simulation image only it needed -- is never built. The task status is the
       CI gate: nonzero iff a case failed, errored, or nothing was selected.
+
+  - root: smoke
+    uses: hdlsim.SimSuiteReport
+    desc: |-
+      Entrypoint for running the project's smoke tests -- a quick subset of `tests`
+    doc: |-
+      A small, fast selection of the project's cases: the one to run before
+      pushing, and the one CI runs on every commit alongside `lint-rtl`.
+      Everything else comes from hdlsim.SimSuiteReport, exactly as for
+      `tests` -- the gate, the report, `junit.xml` and `ctrf.json`.
+
+      A leaf fills it by naming the suite and the cases to take from it:
+
+      ```yaml
+      - override: smoke
+        needs: [uvm.uvm-tests]
+        with:
+          tests: [sw_copy, pss_hello]
+      ```
+
+      The selection prunes the graph at build time, so cases outside it --
+      and any image only they needed -- are never built. `--tests` on the
+      command line narrows it further.
+    # No `std.check.Implemented` here, deliberately: `uses:` already counts as
+    # an implementation, so the check could never fire. An unfilled `smoke`
+    # fails anyway -- SimSuiteReport refuses a run in which no test ran --
+    # which is the same guarantee `tests` has.
 
   - root: tests-info
     uses: hdlsim.SimSuiteInfo

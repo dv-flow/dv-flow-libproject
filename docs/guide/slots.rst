@@ -20,6 +20,8 @@ in every project built this way.
      - The lint flow, wired downstream of ``src-rtl``
    * - :dvf:task:`tests`
      - The cases and suites the regression runs
+   * - :dvf:task:`smoke`
+     - A quick subset of those cases -- what CI runs on every commit
    * - :dvf:task:`tests-info`
      - Nothing -- it reads its inventory off ``tests``
 
@@ -147,3 +149,29 @@ and any simulation image only it needed -- is never built.
 builds nothing. It reads that inventory off ``tests``'s own ``needs:`` at graph
 build, so it cannot drift: a project that adds a suite gets it in
 ``tests-info`` for free, with nothing to keep in sync.
+
+``smoke`` is the quick gate
+---------------------------
+
+:dvf:task:`smoke` is the same kind of task as ``tests`` -- a
+``hdlsim.SimSuiteReport``, with the same gate and the same reports -- over a
+small selection of the cases: the one to run before pushing, and the one CI
+runs on every commit alongside ``lint-rtl``. A project names the suite and the
+cases to take from it:
+
+.. code-block:: yaml
+
+   - override: smoke
+     needs: [uvm-tests]
+     with:
+       tests: [sw_copy, pss_hello]
+
+The selection prunes the graph exactly as ``--tests`` does, so the cases left
+out -- and any image only they needed -- are never built. An unfilled
+``smoke`` fails rather than passing, for the same reason an empty ``tests``
+does: no test ran.
+
+Both suite tasks write ``junit.xml`` and ``ctrf.json`` into their rundir. CTRF
+is also what ``hdllint`` writes for lint, so a CI reporter such as
+``ctrf-io/github-test-reporter`` shows a project's lint and its smoke tests
+side by side.

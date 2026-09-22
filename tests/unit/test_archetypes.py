@@ -65,7 +65,7 @@ def test_the_archetype_supplies_the_project_entrypoints(leaf):
     same command means the same thing in every project that inherits it."""
     proc = _dfm(leaf)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    for verb in ("leaf.tests", "leaf.tests-info"):
+    for verb in ("leaf.tests", "leaf.smoke", "leaf.tests-info"):
         assert verb in proc.stdout, proc.stdout
     # `lint-rtl` is inherited too, but the LEAF fixture declares it
     # not-provided -- see the not-provided tests below.
@@ -106,6 +106,17 @@ def test_an_unimplemented_slot_fails_rather_than_passing_quietly(tmp_path):
     # The hint tells the reader what to wire, rather than only that something
     # is wrong.
     assert "override: src-rtl" in out, out
+
+
+def test_an_unfilled_smoke_slot_fails_rather_than_passing(leaf):
+    """`smoke` is what CI runs on every commit, so an unfilled one passing
+    would be a green build that tested nothing. It carries no
+    `std.check.Implemented` (its `uses:` already counts as an implementation);
+    the guarantee comes from SimSuiteReport refusing a run in which no test
+    ran."""
+    proc = _dfm(leaf, "smoke")
+    assert proc.returncode != 0
+    assert "no tests ran" in proc.stdout + proc.stderr
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@ its sources, its testbench wiring, its cases.
 
 | Package | Kind | What it is |
 | --- | --- | --- |
-| `project.dv` | archetype (`uses:`) | Methodology-neutral DV project: the `src-*`/`lint-*` interface, `tests`/`tests-info`, the `--sim`/`--build` knobs and the flag holders they select, `sv-module`/`sv-package` |
+| `project.dv` | archetype (`uses:`) | Methodology-neutral DV project: the `src-*`/`lint-*` interface, `tests`/`smoke`/`tests-info`, the `--sim`/`--build` knobs and the flag holders they select, `sv-module`/`sv-package` |
 | `project.dv.uvm` | archetype (`uses:`) | `project.dv` plus the UVM building blocks in scope |
 | `project.dv.uvm.utils` | capability (instantiate) | Reusable UVM compounds: `env-base`, `tb-img`, `tb-base`, `run`, `lib` |
 
@@ -37,6 +37,11 @@ package:
 
   - override: tests
     needs: [uvm-tests]
+
+  - override: smoke               # a quick subset, for CI and pre-push
+    needs: [uvm-tests]
+    with:
+      tests: [sw_copy]
 ```
 
 That project now has:
@@ -44,6 +49,7 @@ That project now has:
 ```
 dfm run tests                    # the regression -- nonzero iff a case failed
 dfm run tests --tests arb,err    # a selection; unselected cases are never built
+dfm run smoke                    # the quick subset CI runs on every commit
 dfm run tests-info               # the inventory, building nothing
 dfm run tests --build dbg        # -O0 and waveforms, end to end
 dfm run tests --sim mti          # a different simulator backend
