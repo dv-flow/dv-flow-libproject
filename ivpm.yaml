@@ -3,7 +3,11 @@ package:
   name: dv-flow-libproject
 
   dep-sets:
+  # One set for everything a developer does here: the tests and the docs build
+  # are both routine, and this is a library with no lab-attendee audience, so
+  # there is no short-download set worth protecting.
   - name: default-dev
+    uses: [docs]
     deps:
     - name: pytest
       src: pypi
@@ -11,3 +15,20 @@ package:
       url: https://github.com/dv-flow/dv-flow-mgr.git
     - name: dv-flow-libhdlsim
       url: https://github.com/dv-flow/dv-flow-libhdlsim.git
+
+  - name: docs
+    deps:
+    - { name: sphinx, src: pypi }
+    - { name: furo, src: pypi }
+    - { name: sphinxcontrib-mermaid, src: pypi }
+    # Required, not an upgrade. `dvflow_doc_format = "markdown"` in
+    # docs/conf.py is inert unless myst_parser is a registered extension, and
+    # the symptom is `Unexpected indentation` on the first fenced code block
+    # in a `doc:` string rather than anything naming myst.
+    - { name: myst-parser, src: pypi }
+    - name: sphinx-dv-flow
+      url: https://github.com/dv-flow/sphinx-dv-flow.git
+      # Sources only: its own manifest is a developer environment for THAT
+      # project (sphinx, furo, pytest, a dv-flow-mgr checkout), none of which
+      # this docs build needs on top of what is already listed here.
+      deps: skip

@@ -157,10 +157,12 @@ package:
       and suites into it with `needs:`; everything else comes from
       hdlsim.SimSuiteReport -> std.TestRunner:
 
-        dfm run tests                        # everything
-        dfm run tests --tests arb,err        # just those cases
-        dfm run tests --views rtl            # just that DUT view
-        dfm run tests --detail full          # every case in the report
+      ```
+      dfm run tests                        # everything
+      dfm run tests --tests arb,err        # just those cases
+      dfm run tests --views rtl            # just that DUT view
+      dfm run tests --detail full          # every case in the report
+      ```
 
       Selection prunes the graph at build time, so a deselected case -- and any
       simulation image only it needed -- is never built. The task status is the
@@ -175,7 +177,9 @@ package:
       selects over -- the case names `--tests` accepts and the view names
       `--views` accepts -- and BUILDS NOTHING.
 
-        dfm run tests-info
+      ```
+      dfm run tests-info
+      ```
 
       The inventory is read off the `tests` root's own `needs:` at graph build,
       so it cannot drift from what `tests` would run. A project that adds a

@@ -36,7 +36,7 @@ package:
     needs: [rtl]
 
   - override: tests
-    needs: [uvm.uvm-tests]
+    needs: [uvm-tests]
 ```
 
 That project now has:
@@ -49,62 +49,34 @@ dfm run tests --build dbg        # -O0 and waveforms, end to end
 dfm run tests --sim mti          # a different simulator backend
 ```
 
-`--sim` and `--build` are package variables declared by `project.dv` with
-`cli: true`. A project reads them by plain name (`${{ build }}`), changes a
-default value-only (`with: {build: dbg}`), or restates the declaration to widen
-the accepted set.
-
-## Filling in the interface
-
-`project.dv` declares slots a project is expected to implement. A slot declared
-and never filled runs and reports success, which is the worst outcome for a
-shared interface -- so the ones with no useful empty meaning carry a
-`std.check.Implemented` requirement and fail with a hint instead.
-
-You do not have to run one to find out. `dfm run` marks what is still open:
-
-```
-leaf.lint-rtl   - Entrypoint for running lint on RTL sources  [unimplemented]
-leaf.tests      - Entrypoint for running tests defined by the project
-
-[unimplemented] run `dfm run <task>` for details on how to implement it.
-```
-
-A project with no lint flow says so, rather than leaving the slot hanging:
-
-```yaml
-  - override: lint-rtl
-    uses: std.NotProvided
-```
-
-That takes `lint-rtl` out of `dfm run` entirely -- this project does not offer
-that verb -- while `dfm show task lint-rtl` still reports that the slot exists
-and was declined on purpose. Naming it anyway fails saying so.
-
-Do **not** reach for `requires: [{std.check.Implemented: {severity: off}}]`
-here. That silences the check and leaves a task that reports success, which is
-the exact failure the check exists to prevent. `severity: off` is for declining
-a check you disagree with, not for declaring a slot inapplicable.
-
-## Flags stay with the project
-
-No task in `project.dv.uvm.utils` names a flag holder. Each compound has an
-injection slot -- a passthrough subtask forwarding whatever the instantiation's
-`needs:` feeds it -- so compile, elaborate and run flags arrive through the
-compound boundary:
-
-```yaml
-  - name: uvm-env
-    uses: project.dv.uvm.utils.env-base
-    needs: [rtl, ral, "flags-comp-${{ build }}"]
-```
-
-`flags-comp-${{ build }}` names the holder by the variable rather than by a
-literal, so `--build dbg` moves the library, the image and the run together and
-nothing downstream mentions `opt` or `dbg`.
+`project.dv` declares slots a project is expected to implement, and holds it
+to them: a slot declared and never filled would otherwise run and report
+success, so the ones with no useful empty meaning fail with a hint instead.
+A project that has no lint flow says so -- `- override: lint-rtl` with
+`uses: std.NotProvided` -- rather than leaving the slot hanging.
 
 ## Requirements
 
 * `dv-flow-mgr >= 1.19` -- package `uses:` inheritance of *variables*
 * `dv-flow-libhdlsim` -- the simulation tasks the archetypes are built on
 * `UVM_HOME` -- for the UVM packages; `hdlsim.SimLibUVM` locates UVM through it
+
+## Documentation
+
+Full documentation is in [`docs/`](docs), including a generated reference for
+every task and parameter in the three packages.
+
+```shell
+ivpm update -d default-dev
+./packages/python/bin/sphinx-build -W -b html docs docs/_build/html
+```
+
+| Page | |
+| --- | --- |
+| `docs/quickstart.rst` | A UVM project from nothing, step by step |
+| `docs/guide/archetypes.rst` | Archetype vs capability; why `project.dv.uvm` has no tasks |
+| `docs/guide/slots.rst` | The project interface, `std.check.Implemented`, `std.NotProvided` |
+| `docs/guide/knobs.rst` | `--sim` and `--build` |
+| `docs/guide/flags.rst` | The `flags-<stage>-<variant>` contract |
+| `docs/reference/` | Generated from the flow files |
+| `docs/contributing.rst` | Docs build, coverage gate, and how tasks get documented |

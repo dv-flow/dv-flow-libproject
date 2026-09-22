@@ -20,6 +20,25 @@ authors = [
 description = "Provides dv-flow project archetypes and methodology-specific template tasks"
 license = {file = "LICENSE"}
 
+[project.optional-dependencies]
+# For someone building the docs without ivpm. `myst-parser` is required rather
+# than optional: docs/conf.py sets `dvflow_doc_format = "markdown"`, which is
+# inert unless myst_parser is a registered extension.
+#
+# NOT listed: sphinx-dv-flow, which is not published on PyPI. A direct git
+# reference here would be rejected by PyPI for this package's own metadata, so
+# install it separately:
+#
+#   pip install -e .[docs] git+https://github.com/dv-flow/sphinx-dv-flow.git
+#
+# `ivpm update -d default-dev` handles the whole set -- see docs/contributing.
+docs = [
+    "sphinx",
+    "furo",
+    "sphinxcontrib-mermaid",
+    "myst-parser",
+]
+
 [project.entry-points."dv_flow.mgr"]
 libproject = "dv_flow.libproject.__ext__"
 

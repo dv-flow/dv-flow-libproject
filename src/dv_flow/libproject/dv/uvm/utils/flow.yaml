@@ -83,19 +83,29 @@ package:
   - export: env-base
     desc: Compile a project's shared UVM env and tests packages into a simulation library
     with:
-      # Root of the UVM directory tree (holds env/ tests/ tb/). Defaults to the
-      # instantiation's own srcdir; override to point the shared env/tb tasks
-      # at a different UVM tree. 'basedir' is threaded into both the FileSet
-      # base and its incdirs (incdirs resolve against srcdir, not base).
       basedir:
         type: str
         value: "${{ srcdir }}"
-      # Package files to compile from env/, in dependency order. Defaults to a
-      # glob (alphabetical); override with an explicit ordered list when the
-      # packages form a stack alphabetical order would mis-sequence.
+        desc: Root of the UVM directory tree, holding `env/`, `tests/` and `tb/`
+        # ONE paragraph: the parameter table renders the first paragraph of a
+        # `doc:` and nothing after it. Anything longer belongs in the task's
+        # own `doc:`, which is rendered in full.
+        doc: |-
+          Defaults to the instantiation's own srcdir; override to point the
+          shared env/tests tasks at a different UVM tree. Threaded into both
+          the FileSet `base` AND its `incdirs`, because incdirs resolve
+          against srcdir rather than against base -- a `basedir` reaching only
+          `base` would compile the right files and fail to find the `.svh`
+          files they include.
       env_include:
         type: list
         value: ["*_pkg.sv"]
+        desc: Package files to compile from `env/`, in dependency order
+        doc: |-
+          Defaults to a glob, which yields ALPHABETICAL order -- correct only
+          while the env packages are mutually independent. Override with an
+          explicit ordered list (`[base_pkg.sv, agent_pkg.sv, env_pkg.sv]`) as
+          soon as they form a stack alphabetical order would mis-sequence.
     tasks:
     # Injection slot: forwards whatever the instantiation feeds -- the design
     # package deps AND the project's compile-flag DataItem -- down to env-src ->
@@ -147,13 +157,38 @@ package:
   - export: tb-img
     desc: Build a UVM simulation image from tb top sources and an injected env library
     with:
-      basedir: { type: str, value: "${{ srcdir }}" }
-      # tb top sources to compile (from ${basedir}/tb), e.g. [hdl_top.sv, hvl_top.sv]
-      tb_include: { type: list, value: [] }
-      # Simulation top module(s) -- a genuine list threaded into SimImage.top.
-      top: { type: list }
-      # Extra simulator/compile args for the image (e.g. Verilog-2001 ext map).
-      sim_args: { type: list, value: [] }
+      basedir:
+        type: str
+        value: "${{ srcdir }}"
+        desc: Root of the UVM directory tree; tb sources are read from `${{ basedir }}/tb`
+      tb_include:
+        type: list
+        value: []
+        desc: Testbench top sources to compile, relative to `${{ basedir }}/tb`
+        doc: |-
+          In compile order, e.g. `[hdl_top.sv, hvl_top.sv]`. Empty by default:
+          a tb-img instance with nothing here builds an image from the injected
+          env library alone.
+      top:
+        type: list
+        desc: Simulation top module(s) for the image
+        doc: |-
+          A genuine list, threaded whole-value into the nested
+          `hdlsim.SimImage`'s own list-typed `top` -- usually one name
+          (`top: [hvl_top]`), more where the simulator must elaborate several
+          unconnected tops. No default: there is no project-independent right
+          answer, and an image elaborated against the wrong top fails late and
+          obscurely.
+      sim_args:
+        type: list
+        value: []
+        desc: Extra simulator arguments for the image build
+        doc: |-
+          Passed through to the nested `hdlsim.SimImage`, for where a DUT
+          needs a dialect or elaboration flag the rest of the project does not
+          -- e.g. `["+1364-2001ext+v"]` to parse `.v` sources as Verilog-2001.
+          NOT the place for opt-versus-debug flags: those arrive through the
+          compound boundary from the project's flag holders.
     tasks:
     # Injection slot + tb top sources: receives the compound input (env-lib AND
     # the project's flag DataItems fed via the instantiation's needs), passes it
@@ -188,9 +223,11 @@ package:
       hvl_top:
         type: str
         value: "hvl_top"
+        desc: Name of the HVL-side top module, compiled from `${{ basedir }}/tb` and used as the simulation top
       hdl_top:
         type: str
         value: "hdl_top"
+        desc: Name of the HDL-side top module, compiled from `${{ basedir }}/tb`
     tasks:
     - name: tb-src
       needs: [env-lib]
@@ -216,9 +253,27 @@ package:
   # UVM_TESTNAME plusarg.
   - export: run
     desc: Run one UVM test on an injected simulation image
+    doc: |-
+      The simulation image and the project's run flags both arrive through the
+      compound boundary, via the instantiation's `needs:` -- so this compound
+      names no specific image and no flags, and its only content of its own is
+      the `+UVM_TESTNAME` plusarg:
+
+      ```yaml
+      - name: run-arb
+        uses: project.dv.uvm.utils.run
+        needs: [sim-img, "flags-run-${{ build }}"]
+        with:
+          UVM_TESTNAME: arb_test
+      ```
     with:
       UVM_TESTNAME:
         type: str
+        desc: The UVM test class to run, passed as the `+UVM_TESTNAME` plusarg
+        doc: |-
+          No default, deliberately: there is no test every project has, so an
+          instance that forgets to name one is a mistake rather than a run of
+          something generic.
     tasks:
     - name: sim-run
       uses: hdlsim.SimRun
