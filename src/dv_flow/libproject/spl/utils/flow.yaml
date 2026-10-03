@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://dv-flow.github.io/flow.dv.schema.json
+package:
+  name: project.spl.utils
+  desc: SPL -> RTL compounds -- turn a structural fw-hdl component into an RTL top, each block by an engine
+  doc: |
+    A **capability** package: a project instantiates its compounds by name.
+
+    ```yaml
+    imports:
+    - {name: project.spl.utils, as: spl}
+
+    tasks:
+    - name: chain-rtl
+      uses: spl.xls-rtl
+      needs: [src-spl]
+      with:
+        top: chain_top
+        xls: [rle_enc8_t, pkt_framer, crc32_stream]
+        pipeline_stages: 2
+
+    - override: src-rtl
+      needs: [chain-rtl]
+    ```
+
+    The compounds only wire tasks together; the work happens in the tasks they
+    name, so each step can be run, inspected or replaced on its own.
+
+  tasks:
+  - export: xls-rtl
+    desc: A structural fw-hdl component to an RTL top, with XLS implementing each child class
+    doc: |
+      Four steps, each a task in the package that owns it:
+
+      ```
+      SV sources ──► partition ──┬─ xlsIR ─────────────────► codegen ── xlsModuleSignature ──┐
+        (needs)                  ├─ blockSignaturePrediction ─────────────────────────────► signature ── blockSignature ──┐
+                                 └─ splPartition ──────────────────────────────────────────────────────────────────────► integrate ──► systemVerilogSource
+                                                                                                                                     + the top's blockSignature
+      partition = fw.hdl.spl.Partition    codegen   = synth.xls.Codegen
+      signature = zuspec.xls.Signature    integrate = fw.hdl.spl.Integrate
+      ```
+
+      1. **partition** (`fw.hdl.spl.Partition`) reads `top` -- a component
+         that only builds and connects children and `fw_channel`s -- and
+         emits XLS IR and a predicted signature for each class in `xls`, plus
+         the shell (`partition.json`) the top is integrated from. Classes
+         outside the static subset are reported on their SV lines here.
+      2. **codegen** (`synth.xls.Codegen`) runs `opt_main` and
+         `codegen_main` on every package: a Verilog module and XLS's module
+         signature per class. XLS errors are reported on SV lines too.
+      3. **signature** (`zuspec.xls.Signature`) checks each XLS signature
+         against its prediction and writes the `blockSignature` files.
+      4. **integrate** (`fw.hdl.spl.Integrate`) builds the top from the shell
+         and the signatures alone -- never from a block's Verilog -- with an
+         `fw_rv_fifo` per channel and ready/valid pins per port.
+
+      **Output** -- `systemVerilogSource` in compile order (FIFO, blocks,
+      top), and the top's own `blockSignature`.
+
+      **Customizing.** Instantiate the four tasks yourself instead of this
+      compound to change one step. To use your own RTL for a class, leave it
+      out of codegen and give integrate a `blockSignature` file for it.
+    with:
+      top:
+        type: str
+        desc: The structural top component (class name or typedef)
+      xls:
+        type: list
+        value: []
+        desc: Child classes XLS implements -- in this release, every child
+      pipeline_stages:
+        type: int
+        value: 1
+        desc: Pipeline stages per block; ignored when clock_period_ps is set
+      clock_period_ps:
+        type: int
+        value: 0
+        desc: Target clock period in ps; 0 schedules by pipeline_stages
+      delay_model:
+        type: str
+        value: unit
+        desc: XLS delay model used with clock_period_ps
+    tasks:
+    - name: partition
+      uses: fw.hdl.spl.Partition
+      with:
+        top: "${{ top }}"
+        xls: "${{ xls }}"
+
+    - name: codegen
+      uses: synth.xls.Codegen
+      needs: [partition]
+      with:
+        pipeline_stages: "${{ pipeline_stages }}"
+        clock_period_ps: "${{ clock_period_ps }}"
+        delay_model: "${{ delay_model }}"
+
+    - name: signature
+      uses: zuspec.xls.Signature
+      needs: [partition, codegen]
+
+    - name: integrate
+      uses: fw.hdl.spl.Integrate
+      needs: [partition, signature]

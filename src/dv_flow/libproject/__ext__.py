@@ -27,4 +27,5 @@ def dvfm_packages():
         'project.dv':            os.path.join(pkg_dir, "dv", "flow.yaml"),
         'project.dv.uvm':        os.path.join(pkg_dir, "dv", "uvm", "flow.yaml"),
         'project.dv.uvm.utils':  os.path.join(pkg_dir, "dv", "uvm", "utils", "flow.yaml"),
+        'project.spl.utils':     os.path.join(pkg_dir, "spl", "utils", "flow.yaml"),
     }
