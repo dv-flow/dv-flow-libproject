@@ -150,10 +150,11 @@ package:
   # Build a UVM simulation image for one DUT-view variant. `top` is a genuine
   # list-typed compound param: overridden per-instance with a list
   # (`top: [hvl_top_spl]`) and threaded whole-value into the nested SimImage's
-  # list-typed `top`. The shared env-lib AND the project's compile/elab flag
-  # DataItems are injected through the compound boundary via the
-  # instantiation's `needs:`; they flow in through tb-src (a passthrough
-  # FileSet that also compiles the tb tops named by `tb_include`).
+  # list-typed `top`. The shared env-lib AND the project's compile, elab and
+  # coverage DataItems (usually as the one `flags-img` bundle) are injected
+  # through the compound boundary via the instantiation's `needs:`; they flow
+  # in through tb-src (a passthrough FileSet that also compiles the tb tops
+  # named by `tb_include`).
   - export: tb-img
     desc: Build a UVM simulation image from tb top sources and an injected env library
     with:

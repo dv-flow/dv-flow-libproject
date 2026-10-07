@@ -43,8 +43,8 @@ The packages
    * - :doc:`project.dv <reference/project_dv>`
      - archetype (``uses:``)
      - Methodology-neutral DV project: the ``src-*``/``lint-*`` interface,
-       ``tests``/``tests-info``, the ``--sim``/``--build`` knobs and the flag
-       holders they select, ``sv-module``/``sv-package``
+       ``tests``/``tests-info``, the ``--sim``/``--build``/``--cov`` knobs and
+       the flag holders they select, ``sv-module``/``sv-package``
    * - :doc:`project.dv.uvm <reference/project_dv_uvm>`
      - archetype (``uses:``)
      - ``project.dv`` plus the UVM building blocks in scope

@@ -19,7 +19,7 @@
 #****************************************************************************
 package:
   name: project.dv
-  desc: Methodology-neutral DV project archetype -- the src-*/lint-* interface, the project-wide sim/build knobs, and the flag holders they drive
+  desc: Methodology-neutral DV project archetype -- the src-*/lint-* interface, the project-wide sim/build/cov knobs, and the flag holders they drive
 
   doc: |-
     The base a design-verification project inherits from:
@@ -32,8 +32,9 @@ package:
 
     What that buys is a COMMAND-LINE INTERFACE that is the same in every
     project built this way -- `dfm run tests`, `dfm run smoke`,
-    `dfm run tests-info`, `--sim`, `--build` -- and a set of named slots (`src-rtl`, `src-spl`,
-    `lint-rtl`) a project fills in with `override:`.
+    `dfm run tests-info`, `--sim`, `--build`, `--cov` -- and a set of named
+    slots (`src-rtl`, `src-spl`, `lint-rtl`) a project fills in with
+    `override:`.
 
     Methodology-specific building blocks do not live here. A UVM project
     inherits `project.dv.uvm`, which `uses:` this package and brings the UVM
@@ -44,14 +45,14 @@ package:
     from, the import is what puts it in scope to be found.
 
   # ---- Project-wide knobs ----------------------------------------------------
-  # Declared here rather than in each leaf so that the two questions every DV
-  # project has to answer -- which simulator, which build variant -- are asked
-  # the same way everywhere, and so `dfm run` documents them without the leaf
-  # restating the value set and its per-value help.
+  # Declared here rather than in each leaf so that the questions every DV
+  # project has to answer -- which simulator, which build variant, how much
+  # coverage -- are asked the same way everywhere, and so `dfm run` documents
+  # them without the leaf restating the value set and its per-value help.
   #
-  # A leaf reads them by plain name (`${{ sim }}`, `${{ build }}`), overrides a
-  # DEFAULT value-only (`with: {build: dbg}`), and can restate the whole
-  # declaration to change the accepted set. Inheriting a package variable
+  # A leaf reads them by plain name (`${{ sim }}`, `${{ build }}`,
+  # `${{ cov }}`), overrides a DEFAULT value-only (`with: {build: dbg}`), and
+  # can restate the whole declaration to change the accepted set. Inheriting a package variable
   # requires dv-flow-mgr >= 1.19.
   with:
     sim:
@@ -87,6 +88,32 @@ package:
       values:
       - {value: opt, desc: "optimized -- the regression default"}
       - {value: dbg, desc: "-O0, waveform tracing"}
+
+    cov:
+      type: str
+      value: none
+      cli: true
+      desc: Coverage collected by every image and run in this project
+      doc: |-
+        A third axis rather than more values of `build`: a regression wants
+        `opt` with coverage, a triage run wants `dbg` without, and folding the
+        two together would need a holder for every combination. The levels are
+        ordered, each including the ones below it.
+
+        The level reaches the image through the single `flags-cov` holder (or
+        the `flags-img` bundle that includes it). The run needs nothing: it
+        collects what its image was built for. Changing the level rebuilds
+        every image it reaches.
+
+        On a UVM testbench, `code` and `full` instrument the UVM library along
+        with the design -- no exclusions are applied yet -- so their line and
+        branch figures mostly measure UVM and differ between simulators.
+        `func` is the meaningful level there.
+      values:
+      - {value: none, desc: "no coverage -- the default"}
+      - {value: func, desc: "covergroups and assertions"}
+      - {value: code, desc: "functional plus line/branch/expression"}
+      - {value: full, desc: "code plus toggle and FSM -- the expensive one"}
 
   tasks:
   # ---- The project interface -------------------------------------------------
@@ -195,6 +222,33 @@ package:
     # fails anyway -- SimSuiteReport refuses a run in which no test ran --
     # which is the same guarantee `tests` has.
 
+  - root: coverage
+    uses: hdlsim.SimCovMerge
+    desc: |-
+      Entrypoint for merging the coverage of a `tests` run into one database
+    doc: |-
+      Runs `tests` and merges the coverage databases of its cases with the
+      simulator's own merge utility. The merged database and its totals are
+      the outputs; the suite report and its per-case coverage are produced as
+      for `tests`.
+
+      ```
+      dfm run coverage --cov code                  # the regression, merged
+      dfm run coverage --cov func -D tests=arb,err # a selection, merged
+      ```
+
+      Coverage has to be asked for with `--cov`: at the default `none` no
+      database is written, and the merge fails for want of one. `--tests` and
+      `--views` are flags of the task named on the command line, so here the
+      selection is spelled `-D tests=...`, which reaches `tests` all the same.
+
+      Merging is available on vlt, vcs and mti. On the other simulators
+      `tests --cov <level>` still gives per-case coverage, but this entrypoint
+      fails.
+    needs: [tests]
+    with:
+      sim: "${{ sim }}"
+
   - root: tests-info
     uses: hdlsim.SimSuiteInfo
     desc: |-
@@ -231,6 +285,24 @@ package:
   - { name: flags-elab-dbg, uses: hdlsim.SimElabArgsDbg, with: { sim: "${{ sim }}" } }
   - { name: flags-run-opt,  uses: hdlsim.SimRunArgsOpt,  with: { sim: "${{ sim }}" } }
   - { name: flags-run-dbg,  uses: hdlsim.SimRunArgsDbg,  with: { sim: "${{ sim }}" } }
+
+  # Coverage gets ONE holder, not one per value: the request is a sim-neutral
+  # item whose level is a field, so the knob is threaded in rather than used to
+  # pick a name. It belongs on images only -- SimRun collects whatever its
+  # image was built for, and SimLib is not instrumented.
+  - name: flags-cov
+    uses: hdlsim.SimCovArgs
+    desc: Coverage request for an image build, at the level the `cov` knob selects
+    with: { level: "${{ cov }}" }
+
+  # Everything a project-wide knob contributes to an image build, in one name.
+  # An image that needs `flags-img` picks up a knob added here later without
+  # its own `needs:` changing. The per-stage holders stay for consumers that
+  # want only one of them.
+  - name: flags-img
+    desc: Compile, elaborate and coverage flags for an image build, as the knobs select them
+    passthrough: all
+    needs: ["flags-comp-${{ build }}", "flags-elab-${{ build }}", flags-cov]
 
   # ---- FileSet conveniences --------------------------------------------------
   # `type: systemVerilogSource`, glob the directory. Callers supply `include`

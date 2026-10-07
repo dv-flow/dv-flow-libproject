@@ -22,6 +22,8 @@ in every project built this way.
      - The cases and suites the regression runs
    * - :dvf:task:`smoke`
      - A quick subset of those cases -- what CI runs on every commit
+   * - :dvf:task:`coverage`
+     - Nothing -- it merges the coverage of a ``tests`` run
    * - :dvf:task:`tests-info`
      - Nothing -- it reads its inventory off ``tests``
 
@@ -175,3 +177,30 @@ Both suite tasks write ``junit.xml`` and ``ctrf.json`` into their rundir. CTRF
 is also what ``hdllint`` writes for lint, so a CI reporter such as
 ``ctrf-io/github-test-reporter`` shows a project's lint and its smoke tests
 side by side.
+
+``coverage`` merges a regression's coverage
+-------------------------------------------
+
+:dvf:task:`coverage` runs ``tests`` and merges the coverage databases its cases
+wrote into one, with the simulator's own merge utility. A project wires
+nothing into it: it follows ``tests``.
+
+.. code-block:: text
+
+   $ dfm run coverage --cov code                  # the regression, merged
+   $ dfm run coverage --cov func -D tests=arb,err # a selection, merged
+
+``tests --cov <level>`` already gives each case's coverage, and the best case
+per kind in the suite summary. What ``coverage`` adds is the merged database
+and its totals, which is the figure that answers "what did the regression
+cover".
+
+* Coverage has to be asked for. At the default ``--cov none`` no run writes a
+  database, and ``coverage`` fails saying so rather than passing with nothing
+  merged.
+* ``--tests`` and ``--views`` are flags of the task named on the command line,
+  so here the selection is spelled ``-D tests=...``, which reaches ``tests``
+  all the same.
+* Merging is available on vlt, vcs and mti. On other simulators,
+  ``tests --cov <level>`` still reports per-case coverage, but ``coverage``
+  fails.

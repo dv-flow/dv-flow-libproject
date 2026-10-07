@@ -1,8 +1,8 @@
-Project knobs: ``--sim`` and ``--build``
-========================================
+Project knobs: ``--sim``, ``--build`` and ``--cov``
+===================================================
 
-Every DV project answers two questions, and answers them project-wide: which
-simulator, and which build variant. :doc:`project.dv
+Every DV project answers three questions, and answers them project-wide: which
+simulator, which build variant, and how much coverage to collect. :doc:`project.dv
 <../reference/project_dv>` asks them once, so that each project does not
 invent its own spelling.
 
@@ -11,6 +11,7 @@ invent its own spelling.
    $ dfm run tests --sim mti
    $ dfm run tests --build dbg
    $ dfm run tests -D build=dbg      # same thing, the generic form
+   $ dfm run tests --cov code
 
 .. note::
 
@@ -35,8 +36,12 @@ invent its own spelling.
      - ``opt``
      - ``opt`` (optimized, the regression default), ``dbg`` (``-O0``, waveform
        tracing)
+   * - ``cov``
+     - ``none``
+     - ``none``, ``func`` (covergroups and assertions), ``code`` (adds line,
+       branch and expression), ``full`` (adds toggle and FSM)
 
-Both are declared with ``cli: true``, which is what turns them into flags. A
+All three are declared with ``cli: true``, which is what turns them into flags. A
 value outside the declared set is rejected at the command line rather than
 somewhere downstream.
 
@@ -95,6 +100,40 @@ is: the consumers that should follow the knob name their holder by
 
 So this is a variable, and stays one.
 
+Coverage: ``--cov``
+-------------------
+
+``cov`` is a third axis rather than more values of ``build``. A regression
+wants ``opt`` with coverage and a triage run wants ``dbg`` without, so folding
+the two together would need a holder for every combination. The two combine
+freely instead:
+
+.. code-block:: text
+
+   $ dfm run tests --cov code                 # the regression, with coverage
+   $ dfm run tests --build dbg --cov func     # debug build, functional coverage
+
+The levels are ordered, and each includes the ones below it. What each level
+turns on for each simulator is in dv-flow-libhdlsim's coverage documentation.
+
+The level reaches an image through the :dvf:task:`flags-cov` holder, usually
+by way of the :dvf:task:`flags-img` bundle (see :doc:`flags`). Runs need
+nothing: a run collects what its image was built for. With coverage on,
+``tests`` reports per-case coverage, the best case per kind in the printed
+summary, and the per-case figures in ``junit.xml`` and ``ctrf.json``.
+
+Three things to know:
+
+* **Changing the level rebuilds every image it reaches**, because the image is
+  what is instrumented. Alternating ``tests`` and ``tests --cov code`` in one
+  rundir rebuilds each time, so give a coverage CI job its own rundir.
+* **On a UVM testbench, measure with ``func``.** No exclusions are applied
+  yet, so ``code`` and ``full`` instrument the UVM library along with the
+  design. Their line and branch figures then mostly measure UVM, and differ
+  between simulators.
+* **The suite figure is the best case, not merged coverage.** Merging the
+  cases' databases is a separate step (``hdlsim.SimCovMerge``).
+
 Reaching ``project.dv.uvm.utils``
 ---------------------------------
 
@@ -105,3 +144,6 @@ instantiated, not inherited.
 A project-wide ``--sim``/``-D sim=<name>`` reaches it all the same: an
 unqualified package-variable override applies to every package declaring that
 name. Nothing needs to be threaded through by hand.
+
+``cov`` works the same way: ``--cov code`` also sets ``hdlsim.cov``, so a bare
+``uses: hdlsim.SimCovArgs`` anywhere in the project follows the flag too.

@@ -10,6 +10,10 @@
 #* knobs (which flags exist, and what they reach), and scope (which building
 #* blocks a leaf can name).
 #****************************************************************************
+import glob
+import json
+import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -39,7 +43,7 @@ package:
 
     - root: show
       uses: std.Message
-      with: {msg: "sim=${{ sim }} build=${{ build }}"}
+      with: {msg: "sim=${{ sim }} build=${{ build }} cov=${{ cov }}"}
 '''
 
 
@@ -65,7 +69,7 @@ def test_the_archetype_supplies_the_project_entrypoints(leaf):
     same command means the same thing in every project that inherits it."""
     proc = _dfm(leaf)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    for verb in ("leaf.tests", "leaf.smoke", "leaf.tests-info"):
+    for verb in ("leaf.tests", "leaf.smoke", "leaf.coverage", "leaf.tests-info"):
         assert verb in proc.stdout, proc.stdout
     # `lint-rtl` is inherited too, but the LEAF fixture declares it
     # not-provided -- see the not-provided tests below.
@@ -130,9 +134,11 @@ def test_the_project_knobs_are_inherited_as_flags(leaf):
     assert "Project options" in proc.stdout
     assert "--sim" in proc.stdout
     assert "--build" in proc.stdout
+    assert "--cov" in proc.stdout
     # The per-value documentation comes with them.
     assert "Verilator" in proc.stdout
     assert "waveform tracing" in proc.stdout
+    assert "toggle and FSM" in proc.stdout
 
 
 def test_the_knobs_are_readable_as_variables(leaf):
@@ -141,13 +147,15 @@ def test_the_knobs_are_readable_as_variables(leaf):
     variable would leave the flag with nothing to set."""
     proc = _dfm(leaf, "show")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "sim=vlt build=opt" in proc.stdout
+    assert "sim=vlt build=opt cov=none" in proc.stdout
 
 
 @pytest.mark.parametrize("args,expect", [
-    (["--build", "dbg"], "sim=vlt build=dbg"),
-    (["--sim", "mti"], "sim=mti build=opt"),
-    (["-D", "build=dbg"], "sim=vlt build=dbg"),
+    (["--build", "dbg"], "sim=vlt build=dbg cov=none"),
+    (["--sim", "mti"], "sim=mti build=opt cov=none"),
+    (["-D", "build=dbg"], "sim=vlt build=dbg cov=none"),
+    (["--cov", "code"], "sim=vlt build=opt cov=code"),
+    (["--build", "dbg", "--cov", "func"], "sim=vlt build=dbg cov=func"),
 ])
 def test_a_knob_can_be_set_from_the_command_line(leaf, args, expect):
     proc = _dfm(leaf, "show", *args)
@@ -180,8 +188,9 @@ def test_a_leaf_can_change_a_default_without_restating_the_declaration(tmp_path)
     assert bad.returncode != 0
 
 
-def test_an_unknown_knob_value_is_rejected(leaf):
-    proc = _dfm(leaf, "show", "--build", "nosuch")
+@pytest.mark.parametrize("knob", ["--build", "--cov"])
+def test_an_unknown_knob_value_is_rejected(leaf, knob):
+    proc = _dfm(leaf, "show", knob, "nosuch")
     assert proc.returncode != 0
     assert "invalid choice" in proc.stderr
 
@@ -209,6 +218,193 @@ def test_a_flag_holder_resolves_its_simulator_backend(leaf):
     proc = _dfm(leaf, "flags-run-opt")
     assert "No simulator selected" not in (proc.stdout + proc.stderr)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def _outputs(d, task):
+    """The items `task` emitted, read back from its exec_data record. The
+    holders are DataItem tasks: what they emit is all there is to check."""
+    paths = glob.glob(os.path.join(
+        str(d), "rundir", "*.%s" % task, "*.%s.exec_data.json" % task))
+    assert len(paths) == 1, paths
+    with open(paths[0]) as fp:
+        return json.load(fp)["output"]["output"]
+
+
+@pytest.mark.parametrize("args,level", [
+    ([], "none"),
+    (["--cov", "func"], "func"),
+    (["--cov", "full"], "full"),
+    (["-D", "cov=code"], "code"),
+])
+def test_the_coverage_holder_follows_the_knob(leaf, args, level):
+    """ONE holder for every level, not one per value: the request is a
+    sim-neutral item whose level is a field, so the knob is threaded into the
+    field rather than used to pick a name. A level that did not reach the item
+    would build every image uninstrumented while the flag appeared to work."""
+    proc = _dfm(leaf, "flags-cov", *args)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    items = _outputs(leaf, "flags-cov")
+    assert [(i["type"], i["level"]) for i in items] == \
+        [("hdlsim.SimCovArgs", level)]
+
+
+def test_the_cov_flag_reaches_a_bare_hdlsim_request(tmp_path):
+    """`--cov` binds every package declaring `cov`, hdlsim included, so a bare
+    `uses: hdlsim.SimCovArgs` -- whose level defaults to `hdlsim.cov` --
+    follows the project flag with no holder in between."""
+    (tmp_path / "flow.yaml").write_text(textwrap.dedent('''\
+    package:
+        name: leaf
+        uses: project.dv
+        imports:
+        - project.dv
+        tasks:
+        - root: bare-cov
+          uses: hdlsim.SimCovArgs
+    '''))
+    proc = _dfm(tmp_path, "bare-cov", "--cov", "func")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert [i["level"] for i in _outputs(tmp_path, "bare-cov")] == ["func"]
+
+
+@pytest.mark.parametrize("build", ["opt", "dbg"])
+def test_the_image_bundle_forwards_every_image_flag(leaf, build):
+    """`flags-img` is what an image needs so that a knob added later reaches it
+    without the image's own `needs:` changing. It has to forward the items, not
+    just depend on them -- a bundle that passed nothing through would leave
+    every image built with no flags at all while the run reported success."""
+    proc = _dfm(leaf, "flags-img", "--build", build, "--cov", "code")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    items = _outputs(leaf, "flags-img")
+    by_type = {i["type"]: i for i in items}
+    assert sorted(by_type) == [
+        "hdlsim.SimCompileArgs", "hdlsim.SimCovArgs", "hdlsim.SimElabArgs"]
+    assert by_type["hdlsim.SimCovArgs"]["level"] == "code"
+    srcs = sorted(i["src"] for i in items)
+    assert srcs == sorted([
+        "project.dv.flags-comp-%s" % build,
+        "project.dv.flags-elab-%s" % build,
+        "project.dv.flags-cov"])
+
+
+IMG_LEAF = '''\
+package:
+    name: leaf
+    uses: project.dv
+    imports:
+    - project.dv
+    tasks:
+    - name: rtl
+      uses: std.FileSet
+      with: {type: systemVerilogSource, include: top.sv}
+    - root: img
+      uses: hdlsim.SimImage
+      needs: [rtl, flags-img]
+      with: {sim: vlt, top: [top]}
+'''
+
+
+@pytest.mark.skipif(shutil.which("verilator") is None,
+                    reason="verilator is not on PATH")
+def test_the_cov_flag_instruments_an_image_built_on_the_bundle(tmp_path):
+    """End to end on Verilator: `--cov` -> `flags-cov` -> `flags-img` ->
+    SimImage. The image records the level it was built at in `cov.json`, which
+    is what its runs read, so this is the whole of the project-side wiring."""
+    (tmp_path / "flow.yaml").write_text(textwrap.dedent(IMG_LEAF))
+    (tmp_path / "top.sv").write_text(
+        "module top; initial begin $display(\"hi\"); $finish; end endmodule\n")
+    proc = _dfm(tmp_path, "img", "--cov", "code")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    with open(tmp_path / "rundir" / "leaf.img" / "cov.json") as fp:
+        assert json.load(fp)["level"] == "code"
+
+
+COV_LEAF = '''\
+package:
+    name: leaf
+    uses: project.dv
+    imports:
+    - project.dv
+    tasks:
+    - override: src-rtl
+      needs: [rtl]
+    - override: lint-rtl
+      uses: std.NotProvided
+    - name: rtl
+      uses: std.FileSet
+      with: {type: systemVerilogSource, include: top.sv}
+    - name: img
+      uses: hdlsim.SimImage
+      needs: [src-rtl, flags-img]
+      with: {sim: "${{ sim }}", top: [top]}
+    - name: run-a
+      uses: hdlsim.SimRun
+      needs: [img, "flags-run-${{ build }}"]
+      with: {sim: "${{ sim }}", mode: test}
+    - name: a
+      uses: hdlsim.SimCheck
+      needs: [run-a]
+      tags: [{std.Test: {name: a}}]
+    - name: run-b
+      uses: hdlsim.SimRun
+      needs: [img, "flags-run-${{ build }}"]
+      with: {sim: "${{ sim }}", mode: test}
+    - name: b
+      uses: hdlsim.SimCheck
+      needs: [run-b]
+      tags: [{std.Test: {name: b}}]
+    - override: tests
+      needs: [a, b]
+'''
+
+COV_TOP = """\
+module top;
+  logic [3:0] count = 0;
+  initial begin
+    repeat (4) begin
+      #1 count = count + 1;
+      if (count[0]) $display("odd"); else $display("even");
+    end
+    $finish;
+  end
+endmodule
+"""
+
+
+@pytest.fixture
+def cov_leaf(tmp_path):
+    (tmp_path / "flow.yaml").write_text(textwrap.dedent(COV_LEAF))
+    (tmp_path / "top.sv").write_text(COV_TOP)
+    return tmp_path
+
+
+@pytest.mark.skipif(shutil.which("verilator") is None,
+                    reason="verilator is not on PATH")
+@pytest.mark.parametrize("args,merged", [
+    (["--cov", "code"], 2),
+    (["--cov", "func", "-D", "tests=a"], 1),
+])
+def test_coverage_merges_the_cases_tests_ran(cov_leaf, args, merged):
+    """`coverage` is `tests` plus a merge of what its cases collected. The
+    selection reaches `tests` as `-D tests=...`, since `--tests` is a flag of
+    the task named on the command line, and the merge covers only the cases
+    that ran."""
+    proc = _dfm(cov_leaf, "coverage", *args)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "merged %d coverage database(s)" % merged in proc.stdout, proc.stdout
+    assert (cov_leaf / "rundir" / "leaf.coverage" / "coverage.dat").is_file()
+
+
+@pytest.mark.skipif(shutil.which("verilator") is None,
+                    reason="verilator is not on PATH")
+def test_coverage_without_a_level_fails_and_says_why(cov_leaf):
+    """At the default `--cov none` no run writes a database. A merge of
+    nothing must fail -- a green `coverage` with no coverage would be the
+    quiet-success failure the slots are built to avoid -- and the message has
+    to point at the missing level."""
+    proc = _dfm(cov_leaf, "coverage")
+    assert proc.returncode != 0
+    assert "coverage level" in proc.stdout + proc.stderr
 
 
 # ---------------------------------------------------------------------------

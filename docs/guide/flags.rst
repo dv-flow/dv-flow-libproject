@@ -46,6 +46,54 @@ that variant. The holders live in ``project.dv``, alongside the ``build``
 variable that selects them, because a holder set that does not cover the
 declared value set is a broken project rather than a style choice.
 
+Coverage: one holder, not one per value
+---------------------------------------
+
+:dvf:task:`flags-cov` carries the coverage level the ``cov`` knob selects (see
+:doc:`knobs`). There is one holder rather than one per value, because the
+request is a simulator-neutral ``hdlsim.SimCovArgs`` item and the level is a
+field of it. The knob is threaded into that field instead of choosing a name:
+
+.. code-block:: yaml
+
+   - { name: flags-cov, uses: hdlsim.SimCovArgs, with: { level: "${{ cov }}" } }
+
+It belongs on **images** only. A run collects whatever its image was built
+for, and a compiled library is not instrumented, so neither a run nor
+``env-base`` needs it.
+
+Leaving it off an image is how a project keeps that image uninstrumented
+whatever ``--cov`` says. To pin one image to a fixed level, give it a holder
+of its own (``uses: hdlsim.SimCovArgs`` with ``with: {level: full}``). An
+image takes the highest level it is given.
+
+The image bundle
+----------------
+
+:dvf:task:`flags-img` is everything the knobs contribute to an image build, in
+one name:
+
+.. code-block:: yaml
+
+   - name: flags-img
+     passthrough: all
+     needs: ["flags-comp-${{ build }}", "flags-elab-${{ build }}", flags-cov]
+
+An image that needs ``flags-img`` picks up a knob added to the bundle later
+without its own ``needs:`` changing, which is the point: before the bundle,
+each new knob meant editing every image in every project. The per-stage
+holders are still there for a consumer that wants only one of them, and a
+project that adds a build variant gets the bundle for free, because the
+bundle names its holders by ``${{ build }}`` too.
+
+.. note::
+
+   The bundle resolves ``${{ build }}`` inside ``project.dv``, while that
+   package loads. dv-flow-mgr 1.19.0 does not pass the ``--build`` flag to a
+   registered base package during that load, so ``--build dbg`` gives the
+   bundle the ``opt`` holders (``-D build=dbg`` works). The fix is in
+   dv-flow-mgr after 1.19.0.
+
 How a flag reaches the inside of a compound
 -------------------------------------------
 
@@ -85,10 +133,7 @@ Three instantiations, one knob:
 
    - name: sim-img
      uses: project.dv.uvm.utils.tb-img
-     needs:
-     - uvm-env
-     - "flags-comp-${{ build }}"
-     - "flags-elab-${{ build }}"
+     needs: [uvm-env, flags-img]
      with:
        tb_include: [hdl_top.sv, hvl_top.sv]
        top: [hvl_top]
@@ -100,23 +145,24 @@ Three instantiations, one knob:
        UVM_TESTNAME: arb_test
 
 ``--build dbg`` now moves the library, the image and the run together, and
-nothing in the project mentions ``opt`` or ``dbg``.
+nothing in the project mentions ``opt`` or ``dbg``. ``--cov code`` reaches the
+image through the same bundle.
 
 Adding a build variant
 ----------------------
 
-A project that wants a third variant -- say ``cov`` -- does two things in its
+A project that wants a third variant -- say ``prof`` -- does two things in its
 own flow file:
 
 1. Restate the ``build`` declaration to widen the accepted value set (see
    :doc:`knobs`).
-2. Declare the matching three holders: ``flags-comp-cov``, ``flags-elab-cov``,
-   ``flags-run-cov``.
+2. Declare the matching three holders: ``flags-comp-prof``,
+   ``flags-elab-prof``, ``flags-run-prof``.
 
 Nothing else changes. Every ``needs: ["flags-<stage>-${{ build }}"]`` in the
 project already resolves to the new holders when the knob selects them, which
 is the return on naming the holder by the variable in the first place.
 
 Leaving one out is the failure mode worth knowing about: the project loads
-fine, ``--build cov`` is accepted, and the run fails on an unresolved
+fine, ``--build prof`` is accepted, and the run fails on an unresolved
 reference the first time something needs that stage.

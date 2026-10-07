@@ -13,7 +13,7 @@ its sources, its testbench wiring, its cases.
 
 | Package | Kind | What it is |
 | --- | --- | --- |
-| `project.dv` | archetype (`uses:`) | Methodology-neutral DV project: the `src-*`/`lint-*` interface, `tests`/`smoke`/`tests-info`, the `--sim`/`--build` knobs and the flag holders they select, `sv-module`/`sv-package` |
+| `project.dv` | archetype (`uses:`) | Methodology-neutral DV project: the `src-*`/`lint-*` interface, `tests`/`smoke`/`coverage`/`tests-info`, the `--sim`/`--build`/`--cov` knobs and the flag holders they select, `sv-module`/`sv-package` |
 | `project.dv.uvm` | archetype (`uses:`) | `project.dv` plus the UVM building blocks in scope |
 | `project.dv.uvm.utils` | capability (instantiate) | Reusable UVM compounds: `env-base`, `tb-img`, `tb-base`, `run`, `lib` |
 
@@ -53,6 +53,8 @@ dfm run smoke                    # the quick subset CI runs on every commit
 dfm run tests-info               # the inventory, building nothing
 dfm run tests --build dbg        # -O0 and waveforms, end to end
 dfm run tests --sim mti          # a different simulator backend
+dfm run tests --cov code         # with coverage -- per case, in the suite report
+dfm run coverage --cov code      # the same, plus the cases' coverage merged
 ```
 
 `project.dv` declares slots a project is expected to implement, and holds it
@@ -63,8 +65,15 @@ A project that has no lint flow says so -- `- override: lint-rtl` with
 
 ## Requirements
 
-* `dv-flow-mgr >= 1.19` -- package `uses:` inheritance of *variables*
-* `dv-flow-libhdlsim` -- the simulation tasks the archetypes are built on
+* `dv-flow-mgr >= 1.19` -- package `uses:` inheritance of *variables*. Two
+  fixes after 1.19.0 (unreleased) are needed by the coverage pieces:
+  * `--build dbg` reaching a registered base package as `-D build=dbg` does.
+    Without it, `flags-img --build dbg` forwards the `opt` holders.
+  * An inherited task keeping the leaf's override of its needs when an
+    elaborator rebinds it. Without it, `coverage` also runs `project.dv`'s
+    empty `tests` and fails with "no tests ran".
+* `dv-flow-libhdlsim` -- the simulation tasks the archetypes are built on;
+  `1dfaf5d` or later for `SimCovMerge`, which `coverage` uses
 * `UVM_HOME` -- for the UVM packages; `hdlsim.SimLibUVM` locates UVM through it
 
 ## Documentation
@@ -82,7 +91,7 @@ ivpm update -d default-dev
 | `docs/quickstart.rst` | A UVM project from nothing, step by step |
 | `docs/guide/archetypes.rst` | Archetype vs capability; why `project.dv.uvm` has no tasks |
 | `docs/guide/slots.rst` | The project interface, `std.check.Implemented`, `std.NotProvided` |
-| `docs/guide/knobs.rst` | `--sim` and `--build` |
-| `docs/guide/flags.rst` | The `flags-<stage>-<variant>` contract |
+| `docs/guide/knobs.rst` | `--sim`, `--build` and `--cov` |
+| `docs/guide/flags.rst` | The `flags-<stage>-<variant>` contract, `flags-cov` and the `flags-img` bundle |
 | `docs/reference/` | Generated from the flow files |
 | `docs/contributing.rst` | Docs build, coverage gate, and how tasks get documented |
