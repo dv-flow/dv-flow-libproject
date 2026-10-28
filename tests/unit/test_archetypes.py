@@ -43,7 +43,7 @@ package:
 
     - root: show
       uses: std.Message
-      with: {msg: "sim=${{ sim }} build=${{ build }} cov=${{ cov }}"}
+      with: {msg: "sim=${{ sim }} build=${{ build }} cov=${{ cov }} prof=${{ prof }}"}
 '''
 
 
@@ -69,7 +69,8 @@ def test_the_archetype_supplies_the_project_entrypoints(leaf):
     same command means the same thing in every project that inherits it."""
     proc = _dfm(leaf)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    for verb in ("leaf.tests", "leaf.smoke", "leaf.coverage", "leaf.tests-info"):
+    for verb in ("leaf.tests", "leaf.smoke", "leaf.coverage", "leaf.profile",
+                 "leaf.tests-info"):
         assert verb in proc.stdout, proc.stdout
     # `lint-rtl` is inherited too, but the LEAF fixture declares it
     # not-provided -- see the not-provided tests below.
@@ -135,10 +136,12 @@ def test_the_project_knobs_are_inherited_as_flags(leaf):
     assert "--sim" in proc.stdout
     assert "--build" in proc.stdout
     assert "--cov" in proc.stdout
+    assert "--prof" in proc.stdout
     # The per-value documentation comes with them.
     assert "Verilator" in proc.stdout
     assert "waveform tracing" in proc.stdout
     assert "toggle and FSM" in proc.stdout
+    assert "where the CPU time goes" in proc.stdout
 
 
 def test_the_knobs_are_readable_as_variables(leaf):
@@ -147,15 +150,17 @@ def test_the_knobs_are_readable_as_variables(leaf):
     variable would leave the flag with nothing to set."""
     proc = _dfm(leaf, "show")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "sim=vlt build=opt cov=none" in proc.stdout
+    assert "sim=vlt build=opt cov=none prof=none" in proc.stdout
 
 
 @pytest.mark.parametrize("args,expect", [
-    (["--build", "dbg"], "sim=vlt build=dbg cov=none"),
-    (["--sim", "mti"], "sim=mti build=opt cov=none"),
-    (["-D", "build=dbg"], "sim=vlt build=dbg cov=none"),
-    (["--cov", "code"], "sim=vlt build=opt cov=code"),
-    (["--build", "dbg", "--cov", "func"], "sim=vlt build=dbg cov=func"),
+    (["--build", "dbg"], "sim=vlt build=dbg cov=none prof=none"),
+    (["--sim", "mti"], "sim=mti build=opt cov=none prof=none"),
+    (["-D", "build=dbg"], "sim=vlt build=dbg cov=none prof=none"),
+    (["--cov", "code"], "sim=vlt build=opt cov=code prof=none"),
+    (["--build", "dbg", "--cov", "func"], "sim=vlt build=dbg cov=func prof=none"),
+    (["--prof", "time"], "sim=vlt build=opt cov=none prof=time"),
+    (["--cov", "func", "-D", "prof=mem"], "sim=vlt build=opt cov=func prof=mem"),
 ])
 def test_a_knob_can_be_set_from_the_command_line(leaf, args, expect):
     proc = _dfm(leaf, "show", *args)
@@ -188,7 +193,7 @@ def test_a_leaf_can_change_a_default_without_restating_the_declaration(tmp_path)
     assert bad.returncode != 0
 
 
-@pytest.mark.parametrize("knob", ["--build", "--cov"])
+@pytest.mark.parametrize("knob", ["--build", "--cov", "--prof"])
 def test_an_unknown_knob_value_is_rejected(leaf, knob):
     proc = _dfm(leaf, "show", knob, "nosuch")
     assert proc.returncode != 0
@@ -267,24 +272,61 @@ def test_the_cov_flag_reaches_a_bare_hdlsim_request(tmp_path):
     assert [i["level"] for i in _outputs(tmp_path, "bare-cov")] == ["func"]
 
 
+@pytest.mark.parametrize("args,mode", [
+    ([], "none"),
+    (["--prof", "time"], "time"),
+    (["-D", "prof=mem"], "mem"),
+])
+def test_the_profiling_holder_follows_the_knob(leaf, args, mode):
+    """Profiling has one holder too, for the same reason as coverage: the mode
+    is a field of a sim-neutral item."""
+    proc = _dfm(leaf, "flags-prof", *args)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    items = _outputs(leaf, "flags-prof")
+    assert [(i["type"], i["mode"]) for i in items] == \
+        [("hdlsim.SimProfArgs", mode)]
+
+
+def test_the_prof_flag_reaches_a_bare_hdlsim_request(tmp_path):
+    """`--prof` matches `hdlsim.prof` by name, so a bare
+    `uses: hdlsim.SimProfArgs` follows the project flag."""
+    (tmp_path / "flow.yaml").write_text(textwrap.dedent('''\
+    package:
+        name: leaf
+        uses: project.dv
+        imports:
+        - project.dv
+        tasks:
+        - root: bare-prof
+          uses: hdlsim.SimProfArgs
+    '''))
+    proc = _dfm(tmp_path, "bare-prof", "--prof", "mem")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert [i["mode"] for i in _outputs(tmp_path, "bare-prof")] == ["mem"]
+
+
 @pytest.mark.parametrize("build", ["opt", "dbg"])
 def test_the_image_bundle_forwards_every_image_flag(leaf, build):
     """`flags-img` is what an image needs so that a knob added later reaches it
     without the image's own `needs:` changing. It has to forward the items, not
     just depend on them -- a bundle that passed nothing through would leave
     every image built with no flags at all while the run reported success."""
-    proc = _dfm(leaf, "flags-img", "--build", build, "--cov", "code")
+    proc = _dfm(leaf, "flags-img", "--build", build, "--cov", "code",
+                "--prof", "time")
     assert proc.returncode == 0, proc.stdout + proc.stderr
     items = _outputs(leaf, "flags-img")
     by_type = {i["type"]: i for i in items}
     assert sorted(by_type) == [
-        "hdlsim.SimCompileArgs", "hdlsim.SimCovArgs", "hdlsim.SimElabArgs"]
+        "hdlsim.SimCompileArgs", "hdlsim.SimCovArgs", "hdlsim.SimElabArgs",
+        "hdlsim.SimProfArgs"]
     assert by_type["hdlsim.SimCovArgs"]["level"] == "code"
+    assert by_type["hdlsim.SimProfArgs"]["mode"] == "time"
     srcs = sorted(i["src"] for i in items)
     assert srcs == sorted([
         "project.dv.flags-comp-%s" % build,
         "project.dv.flags-elab-%s" % build,
-        "project.dv.flags-cov"])
+        "project.dv.flags-cov",
+        "project.dv.flags-prof"])
 
 
 IMG_LEAF = '''\
@@ -405,6 +447,36 @@ def test_coverage_without_a_level_fails_and_says_why(cov_leaf):
     proc = _dfm(cov_leaf, "coverage")
     assert proc.returncode != 0
     assert "coverage level" in proc.stdout + proc.stderr
+
+
+# The first simulator here that profiles `time`. Verilator comes last: on a
+# host whose default g++ predates coroutines it can't build a timed design.
+PROF_SIM = next((sim for sim, exe in (("vcs", "vcs"), ("xcm", "xrun"),
+                                      ("mti", "vsim"), ("vlt", "verilator"))
+                 if shutil.which(exe)), None)
+
+
+@pytest.mark.skipif(PROF_SIM is None, reason="no profiling simulator on PATH")
+def test_profile_ranks_the_cases_tests_ran(cov_leaf):
+    """`profile` is `tests` plus a roll-up of the cases' profiles. `--prof`
+    reaches the image through `flags-img`, the image records it in
+    `prof.json`, and its runs follow."""
+    proc = _dfm(cov_leaf, "profile", "--sim", PROF_SIM, "--prof", "time")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    with open(cov_leaf / "rundir" / "leaf.img" / "prof.json") as fp:
+        assert json.load(fp)["mode"] == "time"
+    with open(cov_leaf / "rundir" / "leaf.profile" / "prof_report.json") as fp:
+        report = json.load(fp)
+    assert report["runs"] == 2 and report["time"]["weighted"] == 2
+
+
+@pytest.mark.skipif(PROF_SIM is None, reason="no profiling simulator on PATH")
+def test_profile_without_a_mode_fails_and_says_why(cov_leaf):
+    """At the default `--prof none` no run writes a profile; the report must
+    fail rather than pass with nothing in it, and say what is missing."""
+    proc = _dfm(cov_leaf, "profile", "--sim", PROF_SIM)
+    assert proc.returncode != 0
+    assert "profiling mode" in proc.stdout + proc.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -530,3 +602,25 @@ def test_src_rtl_forwards_its_sources_to_consumers(tmp_path):
     assert published, (
         "src-rtl did not forward its fileset to the consumer\n"
         + proc.stdout + proc.stderr)
+
+
+@pytest.mark.skipif(shutil.which("xrun") is None, reason="xcelium is not on PATH")
+def test_a_deep_profiler_is_a_holder_the_project_adds(cov_leaf):
+    """No knob selects a deep profiler: a project adds the simulator's typed
+    request next to `flags-img`. Here xProf rides along with `--prof time`,
+    whose roll-up still works, xProf's summary standing in for -profile's."""
+    flow = cov_leaf / "flow.yaml"
+    flow.write_text(flow.read_text().replace(
+        "    - override: tests\n",
+        "    - name: xprof\n"
+        "      uses: hdlsim.XcmProfArgs\n"
+        "      with: {xprof: true}\n"
+        "    - override: tests\n").replace(
+        "needs: [src-rtl, flags-img]", "needs: [src-rtl, flags-img, xprof]"))
+    proc = _dfm(cov_leaf, "profile", "--sim", "xcm", "--prof", "time")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    with open(cov_leaf / "rundir" / "leaf.img" / "prof.json") as fp:
+        assert json.load(fp) == {"mode": "time", "deep": {"xprof": True}}
+    assert (cov_leaf / "rundir" / "leaf.run-a" / "xprof_category.txt").is_file()
+    with open(cov_leaf / "rundir" / "leaf.profile" / "prof_report.json") as fp:
+        assert json.load(fp)["runs"] == 2

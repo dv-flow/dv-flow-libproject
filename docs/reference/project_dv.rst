@@ -2,8 +2,8 @@
 ==============
 
 Methodology-neutral DV project archetype: the ``src-*``/``lint-*`` interface,
-the project-wide ``sim``/``build`` knobs, and the flag holders those knobs
-select.
+the project-wide ``sim``/``build``/``cov``/``prof`` knobs, and the flag
+holders those knobs select.
 
 .. code-block:: yaml
 
@@ -18,7 +18,7 @@ is what puts it in scope to be found. A UVM project inherits
 :doc:`project.dv.uvm <project_dv_uvm>` instead, which is this package plus the
 UVM building blocks -- see :doc:`../guide/archetypes`.
 
-The ``--sim`` and ``--build`` knobs are package variables rather than tasks
+The ``--sim``, ``--build``, ``--cov`` and ``--prof`` knobs are package variables rather than tasks
 and do not appear below; :doc:`../guide/knobs` covers them.
 
 The project interface

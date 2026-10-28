@@ -73,7 +73,9 @@ A project that has no lint flow says so -- `- override: lint-rtl` with
     elaborator rebinds it. Without it, `coverage` also runs `project.dv`'s
     empty `tests` and fails with "no tests ran".
 * `dv-flow-libhdlsim` -- the simulation tasks the archetypes are built on;
-  `1dfaf5d` or later for `SimCovMerge`, which `coverage` uses
+  `1dfaf5d` or later for `SimCovMerge`, which `coverage` uses, and a version
+  with `SimProfArgs` and `SimProfReport` (unreleased) for `--prof` and
+  `profile`
 * `UVM_HOME` -- for the UVM packages; `hdlsim.SimLibUVM` locates UVM through it
 
 ## Documentation
@@ -91,7 +93,7 @@ ivpm update -d default-dev
 | `docs/quickstart.rst` | A UVM project from nothing, step by step |
 | `docs/guide/archetypes.rst` | Archetype vs capability; why `project.dv.uvm` has no tasks |
 | `docs/guide/slots.rst` | The project interface, `std.check.Implemented`, `std.NotProvided` |
-| `docs/guide/knobs.rst` | `--sim`, `--build` and `--cov` |
-| `docs/guide/flags.rst` | The `flags-<stage>-<variant>` contract, `flags-cov` and the `flags-img` bundle |
+| `docs/guide/knobs.rst` | `--sim`, `--build`, `--cov` and `--prof` |
+| `docs/guide/flags.rst` | The `flags-<stage>-<variant>` contract, `flags-cov`, `flags-prof` and the `flags-img` bundle |
 | `docs/reference/` | Generated from the flow files |
 | `docs/contributing.rst` | Docs build, coverage gate, and how tasks get documented |

@@ -46,8 +46,8 @@ that variant. The holders live in ``project.dv``, alongside the ``build``
 variable that selects them, because a holder set that does not cover the
 declared value set is a broken project rather than a style choice.
 
-Coverage: one holder, not one per value
----------------------------------------
+Coverage and profiling: one holder, not one per value
+-----------------------------------------------------
 
 :dvf:task:`flags-cov` carries the coverage level the ``cov`` knob selects (see
 :doc:`knobs`). There is one holder rather than one per value, because the
@@ -67,6 +67,17 @@ whatever ``--cov`` says. To pin one image to a fixed level, give it a holder
 of its own (``uses: hdlsim.SimCovArgs`` with ``with: {level: full}``). An
 image takes the highest level it is given.
 
+:dvf:task:`flags-prof` is the same shape for the ``prof`` knob, an
+``hdlsim.SimProfArgs`` item with the mode as a field:
+
+.. code-block:: yaml
+
+   - { name: flags-prof, uses: hdlsim.SimProfArgs, with: { mode: "${{ prof }}" } }
+
+It too belongs on images only. Modes don't combine, so an image given two
+different modes (a pinned ``time`` holder while ``--prof mem`` is set, say)
+fails rather than picking one.
+
 The image bundle
 ----------------
 
@@ -77,7 +88,7 @@ one name:
 
    - name: flags-img
      passthrough: all
-     needs: ["flags-comp-${{ build }}", "flags-elab-${{ build }}", flags-cov]
+     needs: ["flags-comp-${{ build }}", "flags-elab-${{ build }}", flags-cov, flags-prof]
 
 An image that needs ``flags-img`` picks up a knob added to the bundle later
 without its own ``needs:`` changing, which is the point: before the bundle,
@@ -145,24 +156,24 @@ Three instantiations, one knob:
        UVM_TESTNAME: arb_test
 
 ``--build dbg`` now moves the library, the image and the run together, and
-nothing in the project mentions ``opt`` or ``dbg``. ``--cov code`` reaches the
-image through the same bundle.
+nothing in the project mentions ``opt`` or ``dbg``. ``--cov code`` and
+``--prof time`` reach the image through the same bundle.
 
 Adding a build variant
 ----------------------
 
-A project that wants a third variant -- say ``prof`` -- does two things in its
-own flow file:
+A project that wants a third variant -- say ``xprop``, with X-propagation
+on -- does two things in its own flow file:
 
 1. Restate the ``build`` declaration to widen the accepted value set (see
    :doc:`knobs`).
-2. Declare the matching three holders: ``flags-comp-prof``,
-   ``flags-elab-prof``, ``flags-run-prof``.
+2. Declare the matching three holders: ``flags-comp-xprop``,
+   ``flags-elab-xprop``, ``flags-run-xprop``.
 
 Nothing else changes. Every ``needs: ["flags-<stage>-${{ build }}"]`` in the
 project already resolves to the new holders when the knob selects them, which
 is the return on naming the holder by the variable in the first place.
 
 Leaving one out is the failure mode worth knowing about: the project loads
-fine, ``--build prof`` is accepted, and the run fails on an unresolved
+fine, ``--build xprop`` is accepted, and the run fails on an unresolved
 reference the first time something needs that stage.

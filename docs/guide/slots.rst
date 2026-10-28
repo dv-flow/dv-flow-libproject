@@ -24,6 +24,8 @@ in every project built this way.
      - A quick subset of those cases -- what CI runs on every commit
    * - :dvf:task:`coverage`
      - Nothing -- it merges the coverage of a ``tests`` run
+   * - :dvf:task:`profile`
+     - Nothing -- it ranks the cases and modules of a profiled ``tests`` run
    * - :dvf:task:`tests-info`
      - Nothing -- it reads its inventory off ``tests``
 
@@ -204,3 +206,24 @@ cover".
 * Merging is available on vlt, vcs and mti. On other simulators,
   ``tests --cov <level>`` still reports per-case coverage, but ``coverage``
   fails.
+
+``profile`` ranks a regression's costs
+--------------------------------------
+
+:dvf:task:`profile` runs ``tests`` and rolls up its cases' profiles
+(``hdlsim.SimProfReport``). It writes ``prof_report.txt`` and
+``prof_report.json`` with the cases ranked by CPU time, the time per category
+(design, testbench, solver, DPI, ...) summed over the cases, and the modules
+that cost the most. At ``--prof mem`` it ranks by peak memory instead.
+
+.. code-block:: text
+
+   $ dfm run profile --prof time                   # the regression, profiled
+   $ dfm run profile --prof mem -D tests=arb,err   # a selection
+
+* Profiling has to be asked for. At the default ``--prof none`` no run writes a
+  profile, and ``profile`` fails saying so.
+* The selection is spelled ``-D tests=...``, as for ``coverage``.
+* The report works for any simulator, but profiling doesn't: vcs, xcm and mti
+  profile ``time`` and ``mem``, vlt only ``time``. A case on any other
+  simulator is built and run without a profile and counted as unprofiled.

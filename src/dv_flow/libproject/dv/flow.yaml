@@ -19,7 +19,7 @@
 #****************************************************************************
 package:
   name: project.dv
-  desc: Methodology-neutral DV project archetype -- the src-*/lint-* interface, the project-wide sim/build/cov knobs, and the flag holders they drive
+  desc: Methodology-neutral DV project archetype -- the src-*/lint-* interface, the project-wide sim/build/cov/prof knobs, and the flag holders they drive
 
   doc: |-
     The base a design-verification project inherits from:
@@ -32,7 +32,7 @@ package:
 
     What that buys is a COMMAND-LINE INTERFACE that is the same in every
     project built this way -- `dfm run tests`, `dfm run smoke`,
-    `dfm run tests-info`, `--sim`, `--build`, `--cov` -- and a set of named
+    `dfm run tests-info`, `--sim`, `--build`, `--cov`, `--prof` -- and a set of named
     slots (`src-rtl`, `src-spl`, `lint-rtl`) a project fills in with
     `override:`.
 
@@ -47,11 +47,11 @@ package:
   # ---- Project-wide knobs ----------------------------------------------------
   # Declared here rather than in each leaf so that the questions every DV
   # project has to answer -- which simulator, which build variant, how much
-  # coverage -- are asked the same way everywhere, and so `dfm run` documents
+  # coverage, whether to profile -- are asked the same way everywhere, and so `dfm run` documents
   # them without the leaf restating the value set and its per-value help.
   #
   # A leaf reads them by plain name (`${{ sim }}`, `${{ build }}`,
-  # `${{ cov }}`), overrides a DEFAULT value-only (`with: {build: dbg}`), and
+  # `${{ cov }}`, `${{ prof }}`), overrides a DEFAULT value-only (`with: {build: dbg}`), and
   # can restate the whole declaration to change the accepted set. Inheriting a package variable
   # requires dv-flow-mgr >= 1.19.
   with:
@@ -114,6 +114,28 @@ package:
       - {value: func, desc: "covergroups and assertions"}
       - {value: code, desc: "functional plus line/branch/expression"}
       - {value: full, desc: "code plus toggle and FSM -- the expensive one"}
+
+    prof:
+      type: str
+      value: none
+      cli: true
+      desc: Profiling done by every image and run in this project
+      doc: |-
+        A fourth axis, like `cov`: a profile is normally of an `opt` build, so
+        it is not a `build` value. The modes don't combine -- the simulators
+        say to profile time and memory in separate runs.
+
+        The mode reaches the image through the single `flags-prof` holder (or
+        the `flags-img` bundle that includes it). The run needs nothing: it
+        profiles what its image was built for. Changing the mode rebuilds
+        every image it reaches.
+
+        vcs, xcm and mti profile `time` and `mem`; vlt profiles `time`. The
+        other simulators warn and build without profiling.
+      values:
+      - {value: none, desc: "no profiling -- the default"}
+      - {value: time, desc: "where the CPU time goes"}
+      - {value: mem, desc: "where the memory goes"}
 
   tasks:
   # ---- The project interface -------------------------------------------------
@@ -249,6 +271,26 @@ package:
     with:
       sim: "${{ sim }}"
 
+  - root: profile
+    uses: hdlsim.SimProfReport
+    desc: |-
+      Entrypoint for ranking the tests and modules of a profiled `tests` run
+    doc: |-
+      Runs `tests` and rolls up its cases' profiles: the tests ranked by CPU
+      time (or peak memory), the time per category (design, testbench,
+      solver, ...) summed over the cases, and the modules that cost the most.
+      The suite report is produced as for `tests`.
+
+      ```
+      dfm run profile --prof time                   # the regression, profiled
+      dfm run profile --prof mem -D tests=arb,err   # a selection
+      ```
+
+      Profiling has to be asked for with `--prof`: at the default `none` no
+      run writes a profile, and the report fails for want of one. As with
+      `coverage`, the selection is spelled `-D tests=...`.
+    needs: [tests]
+
   - root: tests-info
     uses: hdlsim.SimSuiteInfo
     desc: |-
@@ -295,14 +337,20 @@ package:
     desc: Coverage request for an image build, at the level the `cov` knob selects
     with: { level: "${{ cov }}" }
 
+  # Profiling likewise: one holder, the mode a field, images only.
+  - name: flags-prof
+    uses: hdlsim.SimProfArgs
+    desc: Profiling request for an image build, in the mode the `prof` knob selects
+    with: { mode: "${{ prof }}" }
+
   # Everything a project-wide knob contributes to an image build, in one name.
   # An image that needs `flags-img` picks up a knob added here later without
   # its own `needs:` changing. The per-stage holders stay for consumers that
   # want only one of them.
   - name: flags-img
-    desc: Compile, elaborate and coverage flags for an image build, as the knobs select them
+    desc: Compile, elaborate, coverage and profiling flags for an image build, as the knobs select them
     passthrough: all
-    needs: ["flags-comp-${{ build }}", "flags-elab-${{ build }}", flags-cov]
+    needs: ["flags-comp-${{ build }}", "flags-elab-${{ build }}", flags-cov, flags-prof]
 
   # ---- FileSet conveniences --------------------------------------------------
   # `type: systemVerilogSource`, glob the directory. Callers supply `include`

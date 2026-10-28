@@ -1,8 +1,9 @@
-Project knobs: ``--sim``, ``--build`` and ``--cov``
-===================================================
+Project knobs: ``--sim``, ``--build``, ``--cov`` and ``--prof``
+================================================================
 
-Every DV project answers three questions, and answers them project-wide: which
-simulator, which build variant, and how much coverage to collect. :doc:`project.dv
+Every DV project answers four questions, and answers them project-wide: which
+simulator, which build variant, how much coverage to collect, and whether to
+profile. :doc:`project.dv
 <../reference/project_dv>` asks them once, so that each project does not
 invent its own spelling.
 
@@ -12,6 +13,7 @@ invent its own spelling.
    $ dfm run tests --build dbg
    $ dfm run tests -D build=dbg      # same thing, the generic form
    $ dfm run tests --cov code
+   $ dfm run tests --prof time
 
 .. note::
 
@@ -40,8 +42,12 @@ invent its own spelling.
      - ``none``
      - ``none``, ``func`` (covergroups and assertions), ``code`` (adds line,
        branch and expression), ``full`` (adds toggle and FSM)
+   * - ``prof``
+     - ``none``
+     - ``none``, ``time`` (where the CPU time goes), ``mem`` (where the
+       memory goes)
 
-All three are declared with ``cli: true``, which is what turns them into flags. A
+All four are declared with ``cli: true``, which is what turns them into flags. A
 value outside the declared set is rejected at the command line rather than
 somewhere downstream.
 
@@ -134,6 +140,55 @@ Three things to know:
 * **The suite figure is the best case, not merged coverage.** Merging the
   cases' databases is a separate step (``hdlsim.SimCovMerge``).
 
+Profiling: ``--prof``
+---------------------
+
+``prof`` is a fourth axis, for the same reason as ``cov``: a profile is
+normally of an ``opt`` build, and folding it into ``build`` would need a
+holder per combination.
+
+.. code-block:: text
+
+   $ dfm run tests --prof time                # each case profiled
+   $ dfm run profile --prof time              # ... and ranked across the run
+
+The modes don't combine: the simulators say to profile time and memory in
+separate runs, because each skews the other. vcs, xcm and mti profile both;
+vlt profiles ``time`` only. On any other simulator, or vlt at ``mem``, the
+image warns and builds without profiling. What each mode turns on for each
+simulator is in dv-flow-libhdlsim's profiling documentation.
+
+The mode reaches an image through the :dvf:task:`flags-prof` holder, usually
+by way of the :dvf:task:`flags-img` bundle. Runs need nothing: a run profiles
+what its image was built for. Each case's ``stats`` then carry the share of
+its time per category (``prof_<category>_pct`` and ``_s``), so ``tests``
+totals the seconds spent in, say, the constraint solver across the
+regression. :dvf:task:`profile` ranks the cases and modules (see
+:doc:`slots`).
+
+* **Changing the mode rebuilds every image it reaches**, as with ``--cov``.
+* **Profile with coverage off and ``--build opt``.** Coverage and debug
+  access cost time, and the profile charges that cost to the design.
+
+Each simulator's own deep profiler (Xcelium's xProf, say) has no knob,
+because no two of them mean the same thing. A project that wants one adds
+that simulator's request to its image, next to ``flags-img``:
+
+.. code-block:: yaml
+
+   - name: xprof
+     uses: hdlsim.XcmProfArgs
+     with: { xprof: true }
+   - name: sim-img
+     uses: hdlsim.SimImage
+     needs: [src-rtl, flags-img, xprof]
+
+Every image takes every simulator's request and acts only on its own, so the
+holder stays in place on a project that also builds with ``--sim vcs``. The
+profiler's output stays in each run, for the vendor's tools. With ``--prof
+time`` as well, ``profile`` still ranks the run. dv-flow-libhdlsim's
+profiling documentation lists the deep profilers and what each writes.
+
 Reaching ``project.dv.uvm.utils``
 ---------------------------------
 
@@ -145,5 +200,7 @@ A project-wide ``--sim``/``-D sim=<name>`` reaches it all the same: an
 unqualified package-variable override applies to every package declaring that
 name. Nothing needs to be threaded through by hand.
 
-``cov`` works the same way: ``--cov code`` also sets ``hdlsim.cov``, so a bare
-``uses: hdlsim.SimCovArgs`` anywhere in the project follows the flag too.
+``cov`` and ``prof`` work the same way: ``--cov code`` also sets
+``hdlsim.cov``, and ``--prof time`` sets ``hdlsim.prof``, so a bare
+``uses: hdlsim.SimCovArgs`` or ``uses: hdlsim.SimProfArgs`` anywhere in the
+project follows the flag too.

@@ -98,8 +98,8 @@ reusable -- see :doc:`guide/flags`.
          top: [hvl_top]
 
 :dvf:task:`flags-img` bundles everything the project knobs contribute to an
-image build: the compile and elaborate flags ``--build`` selects, and the
-coverage level ``--cov`` selects. An image that needs the bundle picks up any
+image build: the compile and elaborate flags ``--build`` selects, the
+coverage level ``--cov`` selects, and the profiling mode ``--prof`` selects. An image that needs the bundle picks up any
 knob added to it later without its own ``needs:`` changing.
 
 For a self-contained testbench with no separately shared env, use
@@ -126,6 +126,7 @@ project puts its cases in ``needs:``:
    $ dfm run tests --build dbg         # -O0 and waveforms, end to end
    $ dfm run tests --sim mti           # a different simulator backend
    $ dfm run tests --cov func          # with coverage, per case in the report
+   $ dfm run profile --prof time       # profiled, cases and modules ranked
 
 Selection prunes the graph at build time, so a deselected case -- and any
 simulation image only it needed -- is never built. :dvf:task:`tests-info`
@@ -160,7 +161,7 @@ Where to go next
 
 * :doc:`guide/archetypes` -- why ``project.dv.uvm`` has no tasks of its own,
   and when to inherit ``project.dv`` directly
-* :doc:`guide/knobs` -- ``--sim``, ``--build`` and ``--cov``, and how a project changes
+* :doc:`guide/knobs` -- ``--sim``, ``--build``, ``--cov`` and ``--prof``, and how a project changes
   a default or widens a value set
 * :doc:`guide/flags` -- the ``flags-<stage>-<variant>`` contract, and what
   adding a build variant requires
